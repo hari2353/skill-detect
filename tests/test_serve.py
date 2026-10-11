@@ -183,3 +183,24 @@ def test_loaded_allowlist_still_drops_unknown_esco():
     kept, violations = validate_hits([_hit("esco:ghost", "Python")],
                                      "I know Python", {"esco:1"})
     assert kept == [] and any("esco:ghost" in v for v in violations)
+
+
+def test_overlong_input_refused_not_truncated():
+    # Serve layer must refuse > max_input_chars with 400, matching the
+    # extractor's no-silent-truncation contract (gateway raises ValueError).
+    client = TestClient(_stub_app([_hit("esco:1", "Python")]))
+    r = client.post("/extract", json={"text": "x" * 5000})
+    assert r.status_code == 400 and "too long" in r.json()["detail"]
+    r2 = client.post("/v1/chat/completions",
+                     json={"messages": [{"role": "user", "content": "y" * 5000}]})
+    assert r2.status_code == 400 and "too long" in r2.json()["detail"]
+
+
+def test_v1_models_does_not_load_extractor():
+    def boom():
+        raise AssertionError("models listing must not load weights")
+
+    app = build_app(boom, set(), ServeSettings(audit_file="off"), CircuitBreaker())
+    r = TestClient(app).get("/v1/models")
+    assert r.status_code == 200
+    assert [m["id"] for m in r.json()["data"]] == ["skill-detect-qlora"]

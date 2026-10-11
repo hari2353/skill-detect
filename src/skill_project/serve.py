@@ -139,7 +139,6 @@ def build_metrics(registry: CollectorRegistry) -> dict:
 def build_app(make_extractor=None, known_ids: set[str] | None = None,
               settings: ServeSettings | None = None,
               breaker: CircuitBreaker | None = None) -> FastAPI:
-    from skill_project.gateway import FakeClient, SkillExtractor
     settings = settings or ServeSettings()
     breaker = breaker or CircuitBreaker()
     known_ids = known_ids or set()
@@ -206,8 +205,7 @@ def build_app(make_extractor=None, known_ids: set[str] | None = None,
         async with gate:
             m["inflight"].inc()
             try:
-                import anyio
-                hits = await anyio.to_thread.run_sync(
+                hits = await asyncio.to_thread(
                     lambda: breaker.call(get_extractor().extract, text))
             except RuntimeError as exc:
                 m["requests"].labels("open_circuit" if "open" in str(exc) else "error").inc()
@@ -254,17 +252,23 @@ def build_app(make_extractor=None, known_ids: set[str] | None = None,
     @app.post("/extract")
     async def extract(body: dict, request: Request):
         cid = getattr(request.state, "correlation_id", "-")
-        text = str(body.get("text", ""))[:settings.max_input_chars]
-        return JSONResponse(await run_pipeline(text, cid))
+        raw = str(body.get("text", ""))
+        if len(raw) > settings.max_input_chars:
+            audit({"ts": datetime.now(timezone.utc).isoformat(), "cid": cid,
+                   "text_len": len(raw), "status": 400})
+            raise HTTPException(
+                400, f"input too long ({len(raw)} > {settings.max_input_chars} chars); "
+                     "chunk it upstream — truncation would silently lose skills")
+        return JSONResponse(await run_pipeline(raw, cid))
 
     # ---- OpenAI-compatible surface (clients probe /v1/*; see configs/litellm.yaml) ----
 
     @app.get("/v1/models")
     def v1_models():
-        used = getattr(get_extractor(), "used_model", None) or settings.model_name
-        names = list(dict.fromkeys([settings.model_name, used]))  # dedupe, keep order
+        # Never load the extractor just to list models (real weights are heavy
+        # and may be absent); the served name is static config.
         return {"object": "list", "data": [
-            {"id": n, "object": "model", "owned_by": "skill-detect"} for n in names]}
+            {"id": settings.model_name, "object": "model", "owned_by": "skill-detect"}]}
 
     @app.post("/v1/chat/completions")
     async def v1_chat_completions(body: dict, request: Request):
@@ -277,7 +281,11 @@ def build_app(make_extractor=None, known_ids: set[str] | None = None,
             if isinstance(msg, dict) and msg.get("role") == "user":
                 text = str(msg.get("content", ""))
                 break
-        result = await run_pipeline(text[:settings.max_input_chars], cid)
+        if len(text) > settings.max_input_chars:
+            raise HTTPException(
+                400, f"input too long ({len(text)} > {settings.max_input_chars} chars); "
+                     "chunk it upstream — truncation would silently lose skills")
+        result = await run_pipeline(text, cid)
         content = json.dumps({"hits": result["hits"], "violations": result["violations"],
                               "judge": result["judge"]})
         model = body.get("model") or result["used_model"]

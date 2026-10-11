@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         logging_steps=5,
         save_steps=args.max_steps,
         save_total_limit=1,
-        fp16=True,
+        fp16=torch.cuda.is_available(),  # GPU proofs use fp16; CPU runs must not force it
         report_to="none",
         seed=7,
     )
