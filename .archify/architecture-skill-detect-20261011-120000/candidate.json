@@ -17,10 +17,12 @@
     { "id": "fetch", "type": "backend", "label": "fetch_esco", "sublabel": "ESCO snapshot", "pos": [40, 390], "size": [150, 64] },
     { "id": "dataset", "type": "backend", "label": "build_dataset", "sublabel": "validated JSONL", "pos": [300, 390], "size": [150, 64] },
     { "id": "trainer", "type": "backend", "label": "QLoRA trainer", "sublabel": "TRL SFT r=16 4bit", "pos": [580, 390], "size": [150, 64] },
-    { "id": "adapters", "type": "database", "label": "LoRA adapters", "sublabel": "weights only", "pos": [820, 390], "size": [150, 64] }
+    { "id": "adapters", "type": "database", "label": "LoRA adapters", "sublabel": "weights only", "pos": [820, 390], "size": [150, 64] },
+    { "id": "serve", "type": "backend", "label": "serve-api", "sublabel": "FastAPI :8000", "pos": [820, 90], "size": [150, 64], "tag": "breaker + audit" },
+    { "id": "observe", "type": "cloud", "label": "Prometheus+Grafana", "sublabel": "scrapes /metrics", "pos": [820, 240], "size": [150, 64] }
   ],
   "boundaries": [
-    { "kind": "region", "label": "RTX 3070 laptop, Windows, D: drive", "wraps": ["intake", "router", "qlora", "eval", "taxonomy", "fallback", "fetch", "dataset", "trainer", "adapters"] }
+    { "kind": "region", "label": "RTX 3070 laptop, Windows, D: drive", "wraps": ["intake", "router", "qlora", "eval", "taxonomy", "fallback", "fetch", "dataset", "trainer", "adapters", "serve", "observe"] }
   ],
   "connections": [
     { "id": "intake-to-router", "from": "intake", "to": "router", "label": "POST /extract", "variant": "emphasis" },
@@ -30,12 +32,15 @@
     { "id": "fetch-to-dataset", "from": "fetch", "to": "dataset", "label": "seeds + ESCO" },
     { "id": "dataset-to-trainer", "from": "dataset", "to": "trainer", "label": "train / heldout" },
     { "id": "trainer-to-adapters", "from": "trainer", "to": "adapters", "label": "adapters" },
-    { "id": "adapters-to-qlora", "from": "adapters", "to": "qlora", "label": "mount", "fromSide": "right", "toSide": "right", "via": [[1010, 422], [1010, 122]] },
-    { "id": "dataset-to-eval", "from": "dataset", "to": "eval", "label": "heldout F1", "fromSide": "top", "toSide": "bottom", "via": [[375, 340], [105, 340]] }
+    { "id": "adapters-to-serve", "from": "adapters", "to": "serve", "label": "loads", "fromSide": "left", "toSide": "left", "via": [[785, 422], [785, 122]] },
+    { "id": "dataset-to-eval", "from": "dataset", "to": "eval", "label": "heldout F1", "fromSide": "top", "toSide": "bottom", "via": [[375, 340], [105, 340]] },
+    { "id": "serve-to-qlora", "from": "serve", "to": "qlora", "label": "hosts", "fromSide": "left", "toSide": "right" },
+    { "id": "serve-to-observe", "from": "serve", "to": "observe", "label": "/metrics", "fromSide": "bottom", "toSide": "top" }
   ],
   "cards": [
     { "dot": "cyan", "title": "Serve", "items": ["SkillRouter chain: qlora adapter endpoint, then fallback (configs/litellm.yaml)", "Extractor replies strict JSON only, validated into SkillHits"] },
     { "dot": "emerald", "title": "Data", "items": ["CompositeTaxonomy: ESCO base, third-party mapping, custom registry", "build_dataset validates every record; invalid rows dropped and counted"] },
-    { "dot": "amber", "title": "Train", "items": ["Gemma 3-4B-it, QLoRA 4-bit, r=16, batch 1, grad-checkpoint (Unsloth, WSL2)", "Adapters mount back into the local endpoint; eval reports F1 on heldout"] }
+    { "dot": "amber", "title": "Train", "items": ["Gemma 3-4B-it, QLoRA 4-bit, r=16, batch 1, grad-checkpoint (Unsloth, WSL2)", "Adapters mount back into the local endpoint; eval reports F1 on heldout"] },
+    { "dot": "slate", "title": "Observe", "items": ["FastAPI hosts the chain: breaker, guardrails, judge, audit, correlation IDs", "Prometheus scrapes /metrics; Grafana dashboard; alert on judge/circuit"] }
   ]
 }

@@ -19,7 +19,7 @@ D:; cd D:\skill-project
 python -m venv .venv --system-site-packages; .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"          # light: tests only
 pip install transformers peft trl datasets accelerate safetensors huggingface_hub  # train/infer
-python -m pytest -q              # 24 tests, no network/GPU needed
+python -m pytest -q              # 33 passed, 1 skipped (regression needs train deps); no network/GPU
 ```
 
 Full pipeline (all offline, ~1 min):
@@ -40,8 +40,8 @@ The `.venv` uses `--system-site-packages` to reuse the system torch, then
 upgrades it (system torch 2.0.1 is too old for transformers 5.x):
 
 ```powershell
-.\.venv\Scripts\python -m pip install "numpy==1.26.4" torch torchvision torchaudio `
-  --index-url https://download.pytorch.org/whl/cu121
+.\.venv\Scripts\python -m pip install "numpy==1.26.4" torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 `
+  --index-url https://download.pytorch.org/whl/cu126
 ```
 
 Proof run — ungated tiny model, fp16 LoRA, GPU end-to-end in minutes:
@@ -75,6 +75,18 @@ python scripts/eval_model.py --model google/gemma-3-4b-it --adapter adapters/gem
 Response-only loss is on by default (`assistant_only_loss=True`); if a model's
 chat template lacks generation markers, retry with `--no-assistant-only`.
 
+## Serving (measured § docs/SERVING.md)
+
+```powershell
+$env:SKILL_MODEL="HuggingFaceTB/SmolLM2-135M-Instruct"; $env:SKILL_ADAPTER="adapters/smollm2-proof"
+.\.venv\Scripts\python -m uvicorn skill_project.serve:app --host 127.0.0.1 --port 8000
+# POST /extract (x-correlation-id honored) · GET /health · GET /metrics (Prometheus)
+# docker compose -f deploy/docker-compose.yml up  # Prometheus :9090, Grafana :3000
+```
+
+Proven live: 200 with real GPU weights, correlation echo, audit row, judge
+alert counter, cost $0.00 local. Breaker/guardrails/judge/audit covered by tests.
+
 ## VRAM reality (RTX 3070 8GB)
 
 | Model | Mode | Fits? |
@@ -98,11 +110,13 @@ chat template lacks generation markers, retry with `--no-assistant-only`.
 ```
 SPEC.md tasks/          → living spec + plan + task list
 configs/                → litellm.yaml (router), lora.yaml (Gemma QLoRA recipe)
-src/skill_project/      → taxonomy.py gateway.py dataset.py training.py
+src/skill_project/      → taxonomy.py gateway.py dataset.py training.py serve.py
 scripts/                → fetch_esco, build_custom_skills, build_dataset,
-                          train_qlora (TRL SFT), eval_f1, eval_model, demo_extract
-tests/                  → unit + integration (fakes only at the LLM edge)
-data/ adapters/         → gitignored runtime artifacts
+                          train_qlora (transformers Trainer + PEFT LoRA), eval_f1, eval_model, demo_extract
+tests/                  → unit + integration + serve + CPU regression (fakes only at LLM edge)
+deploy/                 → docker-compose (Prometheus+Grafana), dashboard JSON
+docs/                   → GPU_PROOF.md (measured train proof), SERVING.md (throughput/capacity)
+data/ adapters/ logs/   → gitignored runtime artifacts
 ```
 
 ## Git / upload
