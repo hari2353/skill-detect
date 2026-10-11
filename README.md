@@ -136,3 +136,7 @@ git add -A; git commit -m "msg"; git remote add origin <url>; git push -u origin
 
 Set your identity first: `git config user.name "you"; git config user.email "you@x"`.
 Secrets stay in env (never in yaml); `data/` and `adapters/` are gitignored.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
