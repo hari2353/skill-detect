@@ -20,26 +20,66 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from skill_project.training import LoRAConfig
+from skill_project.training import LoRAConfig, mask_labels
 
 
-def load_text_dataset(path: str, tokenizer, max_len: int):
+def load_text_dataset(path: str, tokenizer, max_len: int, assistant_only: bool = True):
     from datasets import Dataset
-    texts = []
+    rows, masked, fallback = [], 0, 0
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
-            if line:
-                msgs = json.loads(line)["messages"]
-                texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
-    if not texts:
+            if not line:
+                continue
+            msgs = json.loads(line)["messages"]
+            full = tokenizer.apply_chat_template(msgs, tokenize=False)
+            if assistant_only and msgs and msgs[-1].get("role") == "assistant":
+                # Prompt = history + assistant header (WITHOUT the answer).
+                # Rendering the complete chat with add_generation_prompt=True
+                # appends a *second* assistant header, which is not a prefix.
+                prompt = tokenizer.apply_chat_template(msgs[:-1], tokenize=False,
+                                                       add_generation_prompt=True)
+                # No special tokens on either side: the default full encoding
+                # prepends BOS, which would offset the prefix match to zero hits.
+                full_ids = tokenizer(full, add_special_tokens=False)["input_ids"]
+                prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+                labels, ok = mask_labels(full_ids, prompt_ids)
+                bos = tokenizer.bos_token_id
+                if bos is not None:
+                    full_ids = [bos] + full_ids
+                    labels = [-100] + labels
+                full_ids, labels = full_ids[:max_len], labels[:max_len]
+                masked += ok
+                fallback += not ok
+            else:
+                if assistant_only:
+                    fallback += 1  # last turn isn't assistant: nothing safe to mask
+                full_ids = tokenizer(full, truncation=True, max_length=max_len)["input_ids"]
+                labels = list(full_ids)
+            rows.append({"input_ids": full_ids,
+                         "attention_mask": [1] * len(full_ids),
+                         "labels": labels})
+    if not rows:
         raise ValueError(f"no records in {path} — run build_dataset.py first")
-    ds = Dataset.from_dict({"text": texts})
+    print(f"assistant_only={assistant_only} masked={masked} full_loss_fallback={fallback}")
+    return Dataset.from_list(rows)
 
-    def tok(batch):
-        return tokenizer(batch["text"], truncation=True, max_length=max_len)
 
-    return ds.map(tok, batched=True, remove_columns=["text"])
+def pad_collator(tokenizer):
+    """Pad input_ids/attention_mask via the tokenizer, labels with -100."""
+    import torch
+
+    def collate(features):
+        batch = tokenizer.pad(
+            {"input_ids": [f["input_ids"] for f in features],
+             "attention_mask": [f["attention_mask"] for f in features]},
+            padding=True, return_tensors="pt")
+        width = len(batch["input_ids"][0])
+        batch["labels"] = torch.tensor(
+            [f["labels"] + [-100] * (width - len(f["labels"])) for f in features])
+        return batch
+
+    return collate
 
 
 def build_quant_config():
@@ -69,12 +109,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-steps", type=int, default=50)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--quant", choices=["4bit", "none"], default="none")
+    ap.add_argument("--assistant-only", dest="assistant_only", action="store_true", default=True,
+                    help="mask prompt tokens, learn completions (default on)")
+    ap.add_argument("--no-assistant-only", dest="assistant_only", action="store_false",
+                    help="full-sequence loss (e.g. base models without chat template)")
     ap.add_argument("--resume", action="store_true", help="resume last checkpoint in --output")
     args = ap.parse_args(argv)
 
     import torch
     from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
-    from transformers import (AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling,
+    from transformers import (AutoModelForCausalLM, AutoTokenizer,
                               Trainer, TrainingArguments)
 
     cfg = LoRAConfig.from_yaml(args.config)
@@ -101,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
 
-    ds = load_text_dataset(args.train, tok, cfg.max_seq_len)
+    ds = load_text_dataset(args.train, tok, cfg.max_seq_len, args.assistant_only)
     print(f"records={len(ds)}")
     targs = TrainingArguments(
         output_dir=args.output,
@@ -119,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=7,
     )
     trainer = Trainer(model=model, args=targs, train_dataset=ds,
-                      data_collator=DataCollatorForLanguageModeling(tok, mlm=False))
+                      data_collator=pad_collator(tok))
     out = trainer.train(resume_from_checkpoint=True if args.resume else None)
     model.save_pretrained(args.output)
     tok.save_pretrained(args.output)

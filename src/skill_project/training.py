@@ -1,7 +1,7 @@
 """QLoRA training config + guarded entrypoint.
 
 `--smoke` runs on CPU with zero downloads (validates config + prompt wiring).
-Real training lazily imports transformers/peft/trl so `[dev]` stays light.
+Real training lazily imports torch/transformers/peft so `[dev]` stays light.
 """
 from __future__ import annotations
 
@@ -10,6 +10,27 @@ import sys
 from dataclasses import dataclass
 
 import yaml
+
+
+def mask_labels(full_ids: list[int], prompt_ids: list[int], ignore: int = -100):
+    """Response-only labels: mask the prompt prefix, learn the completion.
+
+    Template-agnostic: the caller renders the prompt with
+    `apply_chat_template(..., add_generation_prompt=True)` and the full text
+    normally. Exact prefix match masks everything; a 1-3 token boundary merge
+    (BPE gluing prompt/response together) masks the longest matching prefix;
+    no match returns full-sequence labels plus `matched=False` so the caller
+    can count the fallback instead of silently training the wrong thing.
+    """
+    k = len(prompt_ids)
+    if k == 0 or k > len(full_ids):
+        return list(full_ids), False
+    if full_ids[:k] == prompt_ids:
+        return [ignore] * k + full_ids[k:], True
+    for k2 in range(k - 1, max(0, k - 4), -1):
+        if full_ids[:k2] == prompt_ids[:k2]:
+            return [ignore] * k2 + full_ids[k2:], True
+    return list(full_ids), False
 
 
 @dataclass(frozen=True)

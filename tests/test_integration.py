@@ -8,6 +8,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -136,6 +137,39 @@ def test_litellm_config_chain_valid():
     for entry in fallbacks:
         flat.update(entry)
     assert flat["skill-detect-qlora"] == ["skill-detect-fallback"]
+    # usage-based-routing balances same-model deployments, not cross-model failover
+    assert cfg["router_settings"]["routing_strategy"] != "usage-based-routing"
+    assert cfg["router_settings"].get("num_retries", 0) >= 1
+
+
+def test_litellm_router_constructs_from_config():
+    litellm = pytest.importorskip("litellm")
+    cfg = yaml.safe_load((ROOT / "configs" / "litellm.yaml").read_text(encoding="utf-8"))
+    rs = cfg["router_settings"]
+    r = litellm.Router(model_list=cfg["model_list"], fallbacks=rs["fallbacks"],
+                       routing_strategy=rs["routing_strategy"],
+                       num_retries=rs["num_retries"])
+    assert [m["model_name"] for m in r.get_model_list()] == [
+        "skill-detect-qlora", "skill-detect-fallback"]
+    assert r.fallbacks == [{"skill-detect-qlora": ["skill-detect-fallback"]}]
+
+
+def test_train_script_cli_parses():
+    import train_qlora
+    with pytest.raises(SystemExit) as exc:
+        train_qlora.main(["--help"])
+    assert exc.value.code == 0
+
+
+def test_esco_probe_failure_falls_back_openly(monkeypatch, tmp_path, capsys):
+    import urllib.request
+
+    def boom(*a, **k):
+        raise OSError("no route to host")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert fetch_esco.try_api(10) is None
+    assert "probe failed" in capsys.readouterr().out
 
 
 def test_lora_config_targets_gemma_on_8gb():

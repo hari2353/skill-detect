@@ -39,6 +39,9 @@ python -m skill_project.training --smoke
 The `.venv` uses `--system-site-packages` to reuse the system torch, then
 upgrades it (system torch 2.0.1 is too old for transformers 5.x):
 
+Keep model weights off C: (only ~8GB free there) — the project uses
+`HF_HOME=D:\skill-project\.hf-cache` (persisted via `setx`; gitignored).
+
 ```powershell
 .\.venv\Scripts\python -m pip install "numpy==1.26.4" torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 `
   --index-url https://download.pytorch.org/whl/cu126
@@ -72,8 +75,13 @@ python scripts/train_qlora.py --model google/gemma-3-4b-it --quant 4bit --max-st
 python scripts/eval_model.py --model google/gemma-3-4b-it --adapter adapters/gemma3-4b-qlora
 ```
 
-Response-only loss is on by default (`assistant_only_loss=True`); if a model's
-chat template lacks generation markers, retry with `--no-assistant-only`.
+Response-only loss is real and default on: `--assistant-only` masks prompt
+tokens via the model's own chat template (`add_generation_prompt` on history
+only — rendering the full chat appends a duplicate assistant header, verified
+against SmolLM2). Non-matching rows fall back to full-sequence loss and are
+counted, never silent. Measured: 45/45 rows masked, 10-step loss **0.93 →
+0.77**. `--no-assistant-only` forces full-sequence loss for template-less base
+models.
 
 ## Serving (measured § docs/SERVING.md)
 

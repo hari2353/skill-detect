@@ -267,5 +267,8 @@ def _default_extractor():
 app = build_app()
 
 if __name__ == "__main__":
+    import os
     import uvicorn
-    uvicorn.run("skill_project.serve:app", host="0.0.0.0", port=8000)
+    uvicorn.run("skill_project.serve:app",
+                host=os.environ.get("SKILL_HOST", "127.0.0.1"),  # localhost by default; never 0.0.0.0 unless asked
+                port=int(os.environ.get("SKILL_PORT", "8000")))
