@@ -1,0 +1,17 @@
+model_list:
+  # 1. Local QLoRA adapter (served e.g. via vLLM/Ollama OpenAI-compatible endpoint)
+  - model_name: skill-detect-qlora
+    litellm_params:
+      model: openai/skill-detect-qlora
+      api_base: http://localhost:8000/v1
+      api_key: os.environ/LOCAL_API_KEY
+  # 2. Fallback commercial model (only used when local chain fails)
+  - model_name: skill-detect-fallback
+    litellm_params:
+      model: gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+router_settings:
+  routing_strategy: usage-based-routing
+  fallbacks:
+    - skill-detect-qlora: [skill-detect-fallback]

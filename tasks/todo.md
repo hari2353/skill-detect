@@ -1,0 +1,24 @@
+- [x] Task: Scaffold SPEC + plan + SOLID skeleton (taxonomy/gateway/dataset/training) + tests
+  - Acceptance: `pytest -q` green with `[dev]` extras only
+  - Verify: `python -m pytest -q` in D:\skill-project
+  - Files: SPEC.md, tasks/*, src/skill_project/*, configs/*, tests/*, scripts/*
+- [x] Task: Switch base model to Gemma (3-4B-it default) + Unsloth notes
+  - Acceptance: lora.yaml/SPEC/README/training default all say gemma; smoke passes
+  - Verify: `python -m skill_project.training --smoke` prints gemma model
+  - Files: configs/lora.yaml, SPEC.md, README.md, src/skill_project/training.py
+- [x] Task: ESCO snapshot ingest (API → data/esco_skills.jsonl, 500-seed subset)
+  - Acceptance: offline seed path writes N rows; loader round-trips valid IDs
+  - Verify: `python scripts/fetch_esco.py --offline --limit 60` + `pytest -q`
+  - Files: scripts/fetch_esco.py, data/* (gitignored)
+- [x] Task: Dataset build (public SkillSpan-style + synthetic custom, 80/20 split)
+  - Acceptance: train/heldout written, 0 invalid rows trained on (dropped counted)
+  - Verify: `python scripts/build_dataset.py --esco-n 60` prints train=60 heldout=15 dropped=0
+  - Files: scripts/build_dataset.py, scripts/build_custom_skills.py, src/skill_project/dataset.py
+- [x] Task: Integration tests for real scenarios (resume intake, custom onboarding, outage fallback, scoring, config, demo)
+  - Acceptance: 8 integration tests green, all offline, fakes only at LLM edge
+  - Verify: `python -m pytest -q` → 22 passed
+  - Files: tests/test_integration.py, scripts/eval_f1.py, scripts/demo_extract.py
+- [ ] Task: QLoRA GPU run (opt-in, WSL2 + Unsloth, RTX 3070 8GB recipe)
+  - Acceptance: adapter trains on data/train.jsonl; eval F1 reported on heldout; live route demo
+  - Verify: train log + `python scripts/eval_f1.py` with live extractor
+  - Files: configs/lora.yaml, scripts/demo_extract.py --live

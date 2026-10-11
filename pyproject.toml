@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skill-project"
+version = "0.1.0"
+description = "LiteLLM gateway + QLoRA skill detection (ESCO base, custom skills as LoRA)"
+requires-python = ">=3.11"
+dependencies = ["pyyaml>=6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+gateway = ["litellm>=1.50"]
+train = ["torch>=2.2", "transformers>=4.40", "peft>=0.10", "trl>=0.9", "datasets>=2.19", "bitsandbytes>=0.43"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
