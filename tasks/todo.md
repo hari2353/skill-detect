@@ -18,7 +18,11 @@
   - Acceptance: 8 integration tests green, all offline, fakes only at LLM edge
   - Verify: `python -m pytest -q` → 22 passed
   - Files: tests/test_integration.py, scripts/eval_f1.py, scripts/demo_extract.py
-- [ ] Task: QLoRA GPU run (opt-in, WSL2 + Unsloth, RTX 3070 8GB recipe)
-  - Acceptance: adapter trains on data/train.jsonl; eval F1 reported on heldout; live route demo
-  - Verify: train log + `python scripts/eval_f1.py` with live extractor
-  - Files: configs/lora.yaml, scripts/demo_extract.py --live
+- [x] Task: Real TRL trainer + local HF inference client (HFClient protocol swap)
+  - Acceptance: train_qlora.py (SFT, assistant-only loss, 4bit/fp16) + eval_model.py run; HFClient unit-tested via injected stub
+  - Verify: `pytest -q` → 24 passed; proof run below
+  - Files: scripts/train_qlora.py, scripts/eval_model.py, src/skill_project/gateway.py, tests/test_gateway.py
+- [ ] Task: QLoRA GPU run (proof: SmolLM2-135M fp16 LoRA on RTX 3070; target: Gemma 4B in WSL2)
+  - Acceptance: loss decreases over 50 steps, adapter saved to adapters/, eval_model runs real generation + F1
+  - Verify: train JSON report + `python scripts/eval_model.py --adapter adapters/smollm2-proof`
+  - Files: adapters/* (gitignored), README GPU section

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "c20e76e3-e1d3-4643-b45a-2fc54e1a7564",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\skill-project\\.archify\\architecture-skill-detect-20261011-120000\\candidate.json",
+  "output": "D:\\skill-project\\.archify\\architecture-skill-detect-20261011-120000\\skill-detect.html",
+  "specification": {
+    "sha256": "0f797c21e2b716e4e628ddf4295a643be283e231182fc22df8d8a85ebd7d1227",
+    "bytes": 3645
+  },
+  "artifact": {
+    "sha256": "19283c13947b2cbfe787c59e4cbf8ddf8749976a0075716058367c4c2e9aea7c",
+    "bytes": 762256
+  }
+}

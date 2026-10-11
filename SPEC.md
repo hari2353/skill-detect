@@ -30,17 +30,17 @@ reported on a held-out slice. Full 3B QLoRA run is opt-in (needs ~15GB free).
 ## Commands
 ```powershell
 D:; cd D:\skill-project
-py -m venv .venv; .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"                       # light install (tests run, no GPU needed)
-pip install -e ".[train]"                     # heavy: torch/transformers/peft/trl/bitsandbytes
-pip install -e ".[gateway]"                   # litellm + server deps
-python -m pytest -q                           # Test
+python -m venv .venv --system-site-packages; .\.venv\Scripts\Activate.ps1
+pip install transformers peft trl datasets accelerate safetensors huggingface_hub  # train/infer
+python -m pytest -q                           # Test (24 tests, no network/GPU)
 python scripts\build_custom_skills.py --help  # synthetic custom-skill data
 python scripts\fetch_esco.py --offline --limit 500  # ESCO snapshot (seed fallback offline)
 python scripts\build_dataset.py --help              # train/heldout JSONL, validated
 python scripts\demo_extract.py                      # offline end-to-end demo (no keys)
 python scripts\eval_f1.py --heldout data\heldout.jsonl --mode oracle  # self-test scorer
-python -m skill_project.training --smoke      # smoke: builds adapter graph on CPU, no download
+python scripts\train_qlora.py --help                # real TRL SFT (proof: SmolLM2-135M)
+python scripts\eval_model.py --help                 # score local base+adapter on heldout
+python -m skill_project.training --smoke      # smoke: config + prompt wiring, no download
 ```
 
 ## Project Structure

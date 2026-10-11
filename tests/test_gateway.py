@@ -1,6 +1,6 @@
 import json
 
-from skill_project.gateway import FakeClient, SkillExtractor, SkillRouter
+from skill_project.gateway import FakeClient, HFClient, SkillExtractor, SkillRouter
 from skill_project.taxonomy import CompositeTaxonomy, CustomSkillRegistry, InMemoryTaxonomy, Skill
 
 
@@ -49,3 +49,25 @@ def test_router_rejects_empty_chain():
         pass
     else:
         raise AssertionError("expected ValueError")
+
+
+def _stub_factory(seen: dict):
+    def factory(model_id, adapter_dir):
+        seen["model_id"] = model_id
+        seen["adapter_dir"] = adapter_dir
+        return lambda prompt: json.dumps([{"skill_id": "esco:1", "span": "Python"}])
+    return factory
+
+
+def test_hfclient_uses_injected_pipeline_without_download():
+    seen: dict = {}
+    client = HFClient("any-model", "adapters/x", pipeline_factory=_stub_factory(seen))
+    hits = SkillExtractor(client, "any-model", _tax()).extract("I know Python")
+    assert hits[0].skill_id == "esco:1"
+    assert seen == {"model_id": "any-model", "adapter_dir": "adapters/x"}
+    assert client.calls and client.calls[0][0] == "any-model"
+
+
+def test_hfclient_garbage_output_yields_no_hits():
+    client = HFClient("m", pipeline_factory=lambda mid, ad: (lambda p: "not json"))
+    assert SkillExtractor(client, "m", _tax()).extract("x") == []

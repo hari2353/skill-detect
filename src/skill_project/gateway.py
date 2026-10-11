@@ -92,7 +92,6 @@ class SkillExtractor:
 
 class SkillRouter:
     """Try custom-adapter endpoint -> base model -> fallback. Order is data, not code."""
-
     def __init__(self, client: CompletionClient, taxonomy: CompositeTaxonomy,
                  chain: list[str]) -> None:
         if not chain:
@@ -112,3 +111,52 @@ class SkillRouter:
             except Exception as exc:  # endpoint down -> next in chain
                 last = exc
         raise RuntimeError(f"all models in chain failed: {self._chain}") from last
+
+
+class HFClient:
+    """Local HuggingFace inference behind the CompletionClient protocol.
+
+    `pipeline_factory(model_id, adapter_dir)` builds `prompt -> text`.
+    Default factory lazily imports transformers/peft (needs `.[train]` extras).
+    Inject a stub factory in unit tests — no download required.
+    """
+
+    def __init__(self, model_id: str, adapter_dir: str | None = None,
+                 pipeline_factory=None, max_new_tokens: int = 256) -> None:
+        self._model_id = model_id
+        self._adapter_dir = adapter_dir
+        self._factory = pipeline_factory or _default_hf_pipeline
+        self._max_new_tokens = max_new_tokens
+        self._pipe = None
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, model: str, prompt: str) -> str:
+        self.calls.append((model, prompt))
+        if self._pipe is None:
+            self._pipe = self._factory(self._model_id, self._adapter_dir)
+        return self._pipe(prompt)
+
+
+def _default_hf_pipeline(model_id: str, adapter_dir: str | None):
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+    except ImportError as exc:
+        raise RuntimeError("HF deps missing: use the project .venv (pip install transformers peft accelerate)") from exc
+    tok = AutoTokenizer.from_pretrained(model_id)
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+    mdl = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.float16, device_map="auto")
+    if adapter_dir:
+        try:
+            from peft import PeftModel
+        except ImportError as exc:
+            raise RuntimeError("peft missing: pip install peft") from exc
+        mdl = PeftModel.from_pretrained(mdl, adapter_dir)
+    gen = pipeline("text-generation", model=mdl, tokenizer=tok)
+
+    def run(prompt: str) -> str:
+        out = gen(prompt, max_new_tokens=256, do_sample=False, return_full_text=False)
+        return out[0]["generated_text"]
+
+    return run
