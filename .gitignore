@@ -4,5 +4,6 @@ __pycache__/
 .pytest_cache/
 data/
 adapters/
+logs/
 *.env
 .env

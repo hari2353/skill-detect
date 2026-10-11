@@ -1,0 +1,20 @@
+# Prometheus scrapes the app running NATIVELY on Windows (this laptop has the
+# GPU; the stock CUDA images target Linux). On WSL2/Linux, add the app service
+# back (uncomment below) and scrape `app:8000` instead of host.docker.internal.
+services:
+  prometheus:
+    image: prom/prometheus:v3.3.0
+    ports: ["9090:9090"]
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+  grafana:
+    image: grafana/grafana:11.5.0
+    ports: ["3000:3000"]
+    environment: [GF_SECURITY_ADMIN_PASSWORD=skilldetect]
+    volumes: ["./grafana/provisioning:/etc/grafana/provisioning:ro",
+              "./grafana/dashboards:/var/lib/grafana/dashboards:ro"]
+  # vLLM path (Linux/WSL2 only, Gemma 4B target):
+  # vllm:
+  #   image: vllm/vllm-openai:latest
+  #   runtime: nvidia
+  #   command: ["--model", "google/gemma-3-4b-it", "--enable-lora", "--max-loras", "2"]
+  #   ports: ["8001:8000"]

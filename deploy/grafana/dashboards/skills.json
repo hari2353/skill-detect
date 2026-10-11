@@ -1,0 +1,25 @@
+{
+  "title": "Skill-Detect",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {"id": 1, "type": "stat", "title": "Requests/s", "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+     "targets": [{"expr": "sum(rate(skill_requests_total[1m]))"}]},
+    {"id": 2, "type": "timeseries", "title": "Latency p50/p95 (s)", "gridPos": {"x": 6, "y": 0, "w": 18, "h": 4},
+     "targets": [{"expr": "histogram_quantile(0.5, rate(skill_request_latency_seconds_bucket[5m]))"},
+                 {"expr": "histogram_quantile(0.95, rate(skill_request_latency_seconds_bucket[5m]))"}]},
+    {"id": 3, "type": "stat", "title": "Cost USD (total)", "gridPos": {"x": 0, "y": 4, "w": 6, "h": 4},
+     "targets": [{"expr": "sum(skill_cost_usd_total)"}]},
+    {"id": 4, "type": "timeseries", "title": "Judge score avg", "gridPos": {"x": 6, "y": 4, "w": 9, "h": 4},
+     "targets": [{"expr": "rate(skill_judge_score_sum[5m]) / rate(skill_judge_score_count[5m])"}]},
+    {"id": 5, "type": "stat", "title": "Judge alerts", "gridPos": {"x": 15, "y": 4, "w": 4, "h": 4},
+     "targets": [{"expr": "sum(skill_judge_alerts_total)"}]},
+    {"id": 6, "type": "stat", "title": "Circuit (0 closed/1 open)", "gridPos": {"x": 19, "y": 4, "w": 5, "h": 4},
+     "targets": [{"expr": "skill_circuit_state"}]},
+    {"id": 7, "type": "timeseries", "title": "Guardrail drops", "gridPos": {"x": 0, "y": 8, "w": 12, "h": 4},
+     "targets": [{"expr": "sum by (reason) (rate(skill_guardrail_drops_total[5m]))"}]},
+    {"id": 8, "type": "timeseries", "title": "Tokens in/out per s", "gridPos": {"x": 12, "y": 8, "w": 12, "h": 4},
+     "targets": [{"expr": "sum(rate(skill_tokens_in_total[1m]))"},
+                 {"expr": "sum(rate(skill_tokens_out_total[1m]))"}]}
+  ]
+}

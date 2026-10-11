@@ -9,6 +9,9 @@ learned by LoRA without touching base weights.
 Architecture diagram (open in a browser):
 `.archify/architecture-skill-detect-20261011-120000/skill-detect.html`
 
+Serving + monitoring: `docs/SERVING.md` (measured throughput, capacity,
+Prometheus/Grafana). GPU train proof: `docs/GPU_PROOF.md`.
+
 ## Quickstart (Windows, D: drive)
 
 ```powershell
