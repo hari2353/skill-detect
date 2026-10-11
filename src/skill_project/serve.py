@@ -17,7 +17,7 @@ import os
 import time
 import urllib.request
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -68,12 +68,24 @@ class CircuitBreaker:
 
 
 def validate_hits(hits: list, text: str, known_ids: set[str], max_hits: int = 20):
-    """Guardrails: ground spans, known/custom IDs, cap count. Returns (kept, violations)."""
+    """Guardrails: ground spans, known/custom IDs, cap count. Returns (kept, violations).
+
+    An empty `known_ids` means "no allowlist loaded" — base-taxonomy `esco:*` ids
+    are then accepted (custom:/third_party: always pass by namespace). Once a real
+    allowlist is provided, an `esco:*` id not on it is treated as a hallucination
+    and dropped, so the strict check is never weakened when it matters.
+    """
     kept, violations = [], []
     for h in hits[:max_hits]:
         sid = h.skill_id if hasattr(h, "skill_id") else h.get("skill_id", "")
         span = h.span if hasattr(h, "span") else h.get("span", "")
-        if not (sid in known_ids or sid.startswith("custom:") or sid.startswith("third_party:")):
+        if sid.startswith("custom:") or sid.startswith("third_party:"):
+            allowed = True                      # invented by design; namespace-suffixed
+        elif known_ids:
+            allowed = sid in known_ids          # allowlist loaded: enforce it
+        else:
+            allowed = sid.startswith("esco:")   # no allowlist: accept base ids only
+        if not allowed:
             violations.append(f"unknown id dropped: {sid}")
             continue
         if span and span not in text:
@@ -103,6 +115,7 @@ class ServeSettings:
     sample_rate: float = 0.2
     max_inflight: int = 4
     max_hits: int = 20
+    max_input_chars: int = 4000  # hard cap on request text; longer is refused, not truncated
     webhook: str = ""
     audit_file: str = "logs/audit.jsonl"  # "off" disables; SKILL_AUDIT_TEXT=1 logs raw text
     include_text: bool = False
@@ -171,10 +184,12 @@ def build_app(make_extractor=None, known_ids: set[str] | None = None,
         m["circuit"].set(1 if breaker.state == "open" else 0)
         return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
-    @app.post("/extract")
-    async def extract(body: dict, request: Request):
-        cid = getattr(request.state, "correlation_id", "-")
-        text = str(body.get("text", ""))[:4000]
+    async def run_pipeline(text: str, cid: str) -> dict:
+        """Core extraction: breaker, guardrails, judge, metrics, audit.
+
+        Shared by the native /extract and the OpenAI-compatible
+        /v1/chat/completions so the safety path is never duplicated.
+        """
         base_audit = {"ts": datetime.now(timezone.utc).isoformat(), "cid": cid,
                       "text_len": len(text),
                       "text_sha256": hashlib.sha256(text.encode()).hexdigest()[:16]}
@@ -228,13 +243,53 @@ def build_app(make_extractor=None, known_ids: set[str] | None = None,
         m["requests"].labels("ok").inc()
         audit({**base_audit, "status": 200, "model": used, "n_hits": len(kept),
                "violations": violations, "judge": score, "cost_usd": round(cost, 6)})
-        return JSONResponse({
+        return {
             "correlation_id": cid,
             "hits": [{"skill_id": h.skill_id, "label": h.label,
                       "namespace": h.namespace, "span": h.span} for h in kept],
             "used_model": used, "judge": score, "violations": violations,
             "cost_usd": round(cost, 6), "latency_ms": round((time.monotonic() - t0) * 1000, 1),
-        })
+        }
+
+    @app.post("/extract")
+    async def extract(body: dict, request: Request):
+        cid = getattr(request.state, "correlation_id", "-")
+        text = str(body.get("text", ""))[:settings.max_input_chars]
+        return JSONResponse(await run_pipeline(text, cid))
+
+    # ---- OpenAI-compatible surface (clients probe /v1/*; see configs/litellm.yaml) ----
+
+    @app.get("/v1/models")
+    def v1_models():
+        used = getattr(get_extractor(), "used_model", None) or settings.model_name
+        names = list(dict.fromkeys([settings.model_name, used]))  # dedupe, keep order
+        return {"object": "list", "data": [
+            {"id": n, "object": "model", "owned_by": "skill-detect"} for n in names]}
+
+    @app.post("/v1/chat/completions")
+    async def v1_chat_completions(body: dict, request: Request):
+        """Run extraction on the last user message; return a chat.completion whose
+        content is the JSON hits. Guardrails/breaker/judge all still apply."""
+        cid = getattr(request.state, "correlation_id", "-")
+        msgs = body.get("messages") or []
+        text = ""
+        for msg in reversed(msgs):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                text = str(msg.get("content", ""))
+                break
+        result = await run_pipeline(text[:settings.max_input_chars], cid)
+        content = json.dumps({"hits": result["hits"], "violations": result["violations"],
+                              "judge": result["judge"]})
+        model = body.get("model") or result["used_model"]
+        return {
+            "id": f"chatcmpl-{cid}", "object": "chat.completion",
+            "created": int(time.time()), "model": model,
+            "choices": [{"index": 0, "finish_reason": "stop",
+                         "message": {"role": "assistant", "content": content}}],
+            "usage": {"prompt_tokens": estimate_tokens(text),
+                      "completion_tokens": estimate_tokens(content),
+                      "total_tokens": estimate_tokens(text) + estimate_tokens(content)},
+        }
 
     return app
 

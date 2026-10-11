@@ -119,3 +119,67 @@ def test_audit_trail_written_with_hash_not_text(tmp_path):
     assert len(rows) == 1 and rows[0]["cid"] == "audit-1" and rows[0]["status"] == 200
     assert rows[0]["n_hits"] == 1 and "text" not in rows[0]  # hash only, privacy default
     assert len(rows[0]["text_sha256"]) == 16
+
+
+def test_v1_models_lists_served_models():
+    client = TestClient(_stub_app([_hit("esco:1", "Python")]))
+    r = client.get("/v1/models")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["object"] == "list"
+    ids = [m["id"] for m in body["data"]]
+    assert "skill-detect-qlora" in ids and all(m["object"] == "model" for m in body["data"])
+
+
+def test_v1_chat_completions_wraps_extraction():
+    import json as _json
+    hits = [_hit("esco:1", "Python")]
+    client = TestClient(_stub_app(hits))
+    r = client.post("/v1/chat/completions",
+                    json={"model": "m", "messages": [
+                        {"role": "system", "content": "extract"},
+                        {"role": "user", "content": "Python engineer with ETL pipelines"}]},
+                    headers={"x-correlation-id": "oa-1"})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["object"] == "chat.completion" and b["id"] == "chatcmpl-oa-1"
+    msg = b["choices"][0]["message"]
+    assert msg["role"] == "assistant"
+    payload = _json.loads(msg["content"])
+    assert [h["skill_id"] for h in payload["hits"]] == ["esco:1"]
+    assert b["usage"]["total_tokens"] > 0
+
+
+def test_v1_chat_completions_last_user_message_wins():
+    hits = [_hit("esco:1", "Python")]
+    client = TestClient(_stub_app(hits))
+    # extractor sees the LAST user turn's text, not the system or earlier turns
+    seen = {}
+    class Spy:
+        used_model = "m"
+        def extract(self, text):
+            seen["text"] = text
+            return hits
+    app = build_app(lambda: Spy(), {"esco:1"}, ServeSettings(audit_file="off"), CircuitBreaker())
+    r = TestClient(app).post("/v1/chat/completions", json={"messages": [
+        {"role": "user", "content": "first turn"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "Python engineer with ETL pipelines"}]})
+    assert r.status_code == 200 and seen["text"].startswith("Python engineer")
+
+
+def test_empty_allowlist_accepts_base_and_namespace_ids():
+    # No known_ids loaded -> esco:* accepted, custom/third_party accepted, bogus dropped
+    kept, violations = validate_hits(
+        [_hit("esco:1", "Python"), _hit("custom:x", ""),
+         _hit("third_party:acme:y", ""), _hit("bogus:z", "")],
+        "I know Python", set())
+    assert [h.skill_id for h in kept] == ["esco:1", "custom:x", "third_party:acme:y"]
+    assert any("bogus:z" in v for v in violations)
+
+
+def test_loaded_allowlist_still_drops_unknown_esco():
+    # With a real allowlist, an esco id not on it is a hallucination -> dropped
+    kept, violations = validate_hits([_hit("esco:ghost", "Python")],
+                                     "I know Python", {"esco:1"})
+    assert kept == [] and any("esco:ghost" in v for v in violations)

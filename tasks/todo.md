@@ -27,6 +27,18 @@
   - Verify: train JSON {global_steps 50, first_loss 3.76, last_loss 2.67, adapters/smollm2-proof}; eval F1 0.0 (see note)
   - Result note: loop proven end-to-end on GPU; 135M/50-step model emits prose about the right skill, not strict JSON → F1 0 is a format-following gap, fixed by scale (Gemma 4B) + assistant-only loss. Quality run stays WSL2+gated.
   - Files: scripts/train_qlora.py, scripts/eval_model.py, adapters/* (gitignored)
+- [x] Task: Review pass — fix silent failures (router masking bugs, truncation, dead flags)
+  - Acceptance: router only falls back on availability errors; overlong input refused not cut; dedupe + resume flags
+  - Verify: `pytest -q` green; `build_dataset.py --dedupe` prints 75 -> 56; litellm Router builds from config
+  - Files: src/skill_project/gateway.py, scripts/build_dataset.py, scripts/train_qlora.py, scripts/fetch_esco.py, configs/litellm.yaml
+- [x] Task: Real response-only (assistant-only) loss, verified on GPU
+  - Acceptance: prompt tokens masked via chat template; non-matching rows fall back full-seq and are counted
+  - Verify: train log `assistant_only=True masked=45 full_loss_fallback=0`; 10-step loss 0.93 -> 0.77
+  - Files: scripts/train_qlora.py, src/skill_project/training.py (mask_labels), tests/test_training.py
+- [x] Task: OpenAI-compatible surface + empty-allowlist guardrail fix
+  - Acceptance: GET /v1/models + POST /v1/chat/completions share the safety pipeline; empty known_ids no longer drops all esco:* hits
+  - Verify: `pytest -q` -> 46 passed; /v1/* return 200 (was 404)
+  - Files: src/skill_project/serve.py, tests/test_serve.py
 - [ ] Task: Gemma 3-4B QLoRA quality run (WSL2 + Unsloth + `hf auth login` + license accept)
   - Acceptance: heldout micro-F1 clearly above 0 with strict-JSON hits (ESCO + custom)
   - Verify: `python scripts/eval_model.py --model google/gemma-3-4b-it --adapter adapters/gemma3-4b-qlora`

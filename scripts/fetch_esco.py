@@ -75,7 +75,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="data/esco_skills.jsonl")
     ap.add_argument("--limit", type=int, default=500)
     ap.add_argument("--offline", action="store_true", help="skip network, write seeds")
+    ap.add_argument("--probe", action="store_true", help="report API reachability only")
     args = ap.parse_args(argv)
+    if args.probe:
+        rows = try_api(min(args.limit, 5))
+        print(f"ESCO API reachable: yes, {len(rows)} items" if rows
+              else "ESCO API reachable: NO — using seed snapshot; see message above")
+        return 0 if rows else 1
     out = Path(args.out)
     rows = None if args.offline else try_api(args.limit)
     if rows:

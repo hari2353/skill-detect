@@ -8,6 +8,9 @@ gateway** that routes across base taxonomy, third-party and custom skills.
 User stories:
 - As a builder, I send `POST /extract {text}` and get `[{id, label, namespace, span}]`
   with ESCO IDs for known skills and `custom:*` IDs for my own skills.
+- As a builder, I can send a standard `POST /v1/chat/completions` (OpenAI shape)
+  and get the hits back as the assistant message — so any OpenAI SDK/client works
+  unchanged. `GET /v1/models` lists what's served.
 - As a builder, I register a custom skill (label + 5 example phrases) and it is
   detectable after a short LoRA re-train, without touching base weights.
 - As a builder, I can swap the backing model (local QLoRA endpoint ↔ commercial
@@ -17,8 +20,11 @@ Success = `tests/` green + `train --smoke` builds adapters on CPU + eval F1
 reported on a held-out slice. Full 3B QLoRA run is opt-in (needs ~15GB free).
 
 ## Tech Stack
-- Python 3.11, `litellm>=1.50` (gateway), `transformers`, `peft`, `trl`,
-  `bitsandbytes` (4-bit QLoRA), `datasets`, `pyyaml`, `pytest`
+- Python 3.11, `litellm>=1.50` (gateway), `transformers`, `peft`, `datasets`,
+  `pyyaml`, `pytest`. Serving: `fastapi`, `uvicorn`, `prometheus_client`.
+- Trainer is plain `transformers.Trainer` + PEFT LoRA (response-only loss).
+  TRL/bitsandbytes are Linux-first (triton/4-bit) — used in WSL2, not on native
+  Windows; see `scripts/train_qlora.py` header for why.
 - Base model (default): `google/gemma-3-4b-it` — strongest strict-JSON extraction
   in the 8GB QLoRA class (Unsloth required). Alt: `Qwen2.5-3B-Instruct` (lighter,
   comfortable without Unsloth). 7B+ documented but NOT default.

@@ -89,6 +89,7 @@ models.
 $env:SKILL_MODEL="HuggingFaceTB/SmolLM2-135M-Instruct"; $env:SKILL_ADAPTER="adapters/smollm2-proof"
 .\.venv\Scripts\python -m uvicorn skill_project.serve:app --host 127.0.0.1 --port 8000
 # POST /extract (x-correlation-id honored) · GET /health · GET /metrics (Prometheus)
+# OpenAI-compatible: GET /v1/models · POST /v1/chat/completions (extraction via last user turn)
 # docker compose -f deploy/docker-compose.yml up  # Prometheus :9090, Grafana :3000
 ```
 
