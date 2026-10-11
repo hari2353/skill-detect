@@ -77,8 +77,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--heldout-frac", type=float, default=0.2)
     ap.add_argument("--esco-n", type=int, default=200)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--dedupe", action="store_true", help="drop identical texts (repeated sentences)")
     args = ap.parse_args(argv)
     records, _tax, dropped = build_records(Path(args.esco), Path(args.custom), args.esco_n, args.seed)
+    if args.dedupe:
+        seen_text, deduped = set(), []
+        for r in records:
+            if r.text in seen_text:
+                continue
+            seen_text.add(r.text)
+            deduped.append(r)
+        print(f"deduped {len(records)} -> {len(deduped)}")
+        records = deduped
     if not records:
         print("no valid records — run fetch_esco.py + build_custom_skills.py first")
         return 1

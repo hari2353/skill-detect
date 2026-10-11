@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-steps", type=int, default=50)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--quant", choices=["4bit", "none"], default="none")
+    ap.add_argument("--resume", action="store_true", help="resume last checkpoint in --output")
     args = ap.parse_args(argv)
 
     import torch
@@ -119,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     trainer = Trainer(model=model, args=targs, train_dataset=ds,
                       data_collator=DataCollatorForLanguageModeling(tok, mlm=False))
-    out = trainer.train()
+    out = trainer.train(resume_from_checkpoint=True if args.resume else None)
     model.save_pretrained(args.output)
     tok.save_pretrained(args.output)
     losses = [e["loss"] for e in trainer.state.log_history if "loss" in e]

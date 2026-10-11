@@ -43,13 +43,16 @@ def write_seeds(path: Path, limit: int) -> int:
 
 
 def try_api(limit: int) -> list[dict] | None:
-    """Best-effort ESCO fetch. Returns None on any failure (caller falls back)."""
+    """Best-effort ESCO fetch. Returns None on any failure (caller falls back).
+    Probe first so an unsupported payload is reported instead of silently
+    degrading to seeds."""
     try:
         url = f"{ESCO_API}?language=en&limit={min(limit, 100)}"
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-    except Exception:
+    except Exception as exc:
+        print(f"ESCO API probe failed ({exc}); see docs/GPU_PROOF.md note on seed fallback")
         return None
     items = payload if isinstance(payload, list) else payload.get("results", payload.get("_embedded", []))
     rows: list[dict] = []
@@ -62,6 +65,8 @@ def try_api(limit: int) -> list[dict] | None:
         uri = it.get("uri") or it.get("id")
         if label and uri:
             rows.append({"id": str(uri).split("/")[-1], "label": str(label), "aliases": []})
+    if not rows:
+        print("ESCO API returned no usable items; add a snapshot loader for the live schema")
     return rows or None
 
 

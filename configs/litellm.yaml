@@ -12,6 +12,9 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY
 
 router_settings:
-  routing_strategy: usage-based-routing
+  # usage-based-routing only balances across deployments of the SAME model;
+  # cross-model failover is declared with fallbacks.
+  routing_strategy: simple-shuffle
+  num_retries: 2
   fallbacks:
     - skill-detect-qlora: [skill-detect-fallback]

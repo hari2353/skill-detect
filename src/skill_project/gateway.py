@@ -6,10 +6,13 @@ and `pip install -e .[dev]` never need it.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from .taxonomy import CompositeTaxonomy, Skill
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -64,14 +67,23 @@ EXTRACTION_PROMPT = (
 class SkillExtractor:
     """Single-model extractor: prompt -> JSON -> validated SkillHits."""
 
+    max_input_chars = 4000   # beyond this the text is chunked upstream, never silently cut
+    known_id_limit = 200     # IDs listed in the prompt
+
     def __init__(self, client: CompletionClient, model: str, taxonomy: CompositeTaxonomy) -> None:
         self._client = client
         self._model = model
         self._taxonomy = taxonomy
+        self.truncated_inputs: list[str] = []
 
     def extract(self, text: str) -> list[SkillHit]:
-        known = [s.id for s in list(self._taxonomy.all_skills())[:50]]
-        prompt = EXTRACTION_PROMPT.format(known_ids=", ".join(known), text=text[:2000])
+        known = [s.id for s in list(self._taxonomy.all_skills())[:self.known_id_limit]]
+        if len(text) > self.max_input_chars:
+            self.truncated_inputs.append(text[:80])
+            raise ValueError(
+                f"input too long ({len(text)} > {self.max_input_chars} chars); "
+                "chunk it upstream — truncation would silently lose skills")
+        prompt = EXTRACTION_PROMPT.format(known_ids=", ".join(known), text=text)
         raw = self._client.complete(self._model, prompt)
         try:
             items = json.loads(raw)
@@ -91,7 +103,15 @@ class SkillExtractor:
 
 
 class SkillRouter:
-    """Try custom-adapter endpoint -> base model -> fallback. Order is data, not code."""
+    """Try custom-adapter endpoint -> base model -> fallback. Order is data, not code.
+
+    Only *availability* failures (connection/timeout/RuntimeError from the client)
+    trigger the next model. Programming errors (ValueError, TypeError, ...) are
+    re-raised immediately — a bug must never be silently masked as 'endpoint down'.
+    """
+
+    AVAILABILITY_ERRORS = (ConnectionError, TimeoutError, OSError, RuntimeError)
+
     def __init__(self, client: CompletionClient, taxonomy: CompositeTaxonomy,
                  chain: list[str]) -> None:
         if not chain:
@@ -108,7 +128,8 @@ class SkillRouter:
                 hits = SkillExtractor(self._client, model, self._taxonomy).extract(text)
                 self.used_model = model
                 return hits
-            except Exception as exc:  # endpoint down -> next in chain
+            except self.AVAILABILITY_ERRORS as exc:  # endpoint down -> next in chain
+                logger.warning("model %s unavailable (%s); trying next in chain", model, exc)
                 last = exc
         raise RuntimeError(f"all models in chain failed: {self._chain}") from last
 
@@ -133,11 +154,11 @@ class HFClient:
     def complete(self, model: str, prompt: str) -> str:
         self.calls.append((model, prompt))
         if self._pipe is None:
-            self._pipe = self._factory(self._model_id, self._adapter_dir)
+            self._pipe = self._factory(self._model_id, self._adapter_dir, self._max_new_tokens)
         return self._pipe(prompt)
 
 
-def _default_hf_pipeline(model_id: str, adapter_dir: str | None):
+def _default_hf_pipeline(model_id: str, adapter_dir: str | None, max_new_tokens: int = 256):
     try:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
@@ -156,7 +177,7 @@ def _default_hf_pipeline(model_id: str, adapter_dir: str | None):
     gen = pipeline("text-generation", model=mdl, tokenizer=tok)
 
     def run(prompt: str) -> str:
-        out = gen(prompt, max_new_tokens=256, do_sample=False, return_full_text=False)
+        out = gen(prompt, max_new_tokens=max_new_tokens, do_sample=False, return_full_text=False)
         return out[0]["generated_text"]
 
     return run

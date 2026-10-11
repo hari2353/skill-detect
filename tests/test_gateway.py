@@ -52,22 +52,48 @@ def test_router_rejects_empty_chain():
 
 
 def _stub_factory(seen: dict):
-    def factory(model_id, adapter_dir):
+    def factory(model_id, adapter_dir, max_new_tokens=256):
         seen["model_id"] = model_id
         seen["adapter_dir"] = adapter_dir
+        seen["max_new_tokens"] = max_new_tokens
         return lambda prompt: json.dumps([{"skill_id": "esco:1", "span": "Python"}])
     return factory
 
 
 def test_hfclient_uses_injected_pipeline_without_download():
     seen: dict = {}
-    client = HFClient("any-model", "adapters/x", pipeline_factory=_stub_factory(seen))
+    client = HFClient("any-model", "adapters/x", pipeline_factory=_stub_factory(seen),
+                      max_new_tokens=64)
     hits = SkillExtractor(client, "any-model", _tax()).extract("I know Python")
     assert hits[0].skill_id == "esco:1"
-    assert seen == {"model_id": "any-model", "adapter_dir": "adapters/x"}
+    assert seen == {"model_id": "any-model", "adapter_dir": "adapters/x", "max_new_tokens": 64}
     assert client.calls and client.calls[0][0] == "any-model"
 
 
 def test_hfclient_garbage_output_yields_no_hits():
-    client = HFClient("m", pipeline_factory=lambda mid, ad: (lambda p: "not json"))
+    client = HFClient("m", pipeline_factory=lambda mid, ad, n=256: (lambda p: "not json"))
     assert SkillExtractor(client, "m", _tax()).extract("x") == []
+
+
+def test_extractor_refuses_overlong_input_instead_of_truncating():
+    ex = SkillExtractor(FakeClient("[]"), "m", _tax())
+    try:
+        ex.extract("x" * 5000)
+    except ValueError as exc:
+        assert "too long" in str(exc)
+    else:
+        raise AssertionError("expected refusal, not silent truncation")
+
+
+def test_router_does_not_mask_bugs_as_outage():
+    class Bug(FakeClient):
+        def complete(self, model, prompt):
+            raise TypeError("real bug")
+
+    router = SkillRouter(Bug(), _tax(), ["m1", "m2"])
+    try:
+        router.extract("hello")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("TypeError must propagate, not trigger fallback")
