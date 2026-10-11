@@ -1,10 +1,15 @@
-"""Real QLoRA SFT with TRL (API verified against TRL 1.x SFT docs).
+"""LoRA SFT with plain transformers Trainer + PEFT (no TRL fused-kernel path).
 
-Proof default (ungated, tiny): HuggingFaceTB/SmolLM2-135M-Instruct — proves the
-full GPU loop on 8GB in minutes.
+Why not TRL SFTTrainer here: TRL 1.x unconditionally patches a triton fused LM
+head; triton has no Windows wheels, so the fused path crashes with
+`'NoneType' has no .apply` on native Windows. Same math (token NLL, full
+sequence), zero fused kernels. Revisit TRL inside WSL2.
+
+Proof default (ungated, tiny): HuggingFaceTB/SmolLM2-135M-Instruct — full GPU
+loop on 8GB in minutes.
 Target per configs/lora.yaml: google/gemma-3-4b-it (gated: `hf auth login` +
-accept the license; 4-bit needs bitsandbytes, which is Linux-first — on native
-Windows use --quant none for ≤1B proof models or WSL2 for the 4B QLoRA run).
+accept the license; 4-bit needs bitsandbytes, Linux-first — native Windows
+uses --quant none for small proofs, WSL2 for the 4B QLoRA run).
 """
 from __future__ import annotations
 
@@ -18,34 +23,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from skill_project.training import LoRAConfig
 
 
-def load_chat_dataset(path: str):
+def load_text_dataset(path: str, tokenizer, max_len: int):
     from datasets import Dataset
-    rows = []
+    texts = []
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if line:
-                rows.append(json.loads(line))  # {"messages": [...]} conversational LM
-    if not rows:
+                msgs = json.loads(line)["messages"]
+                texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
+    if not texts:
         raise ValueError(f"no records in {path} — run build_dataset.py first")
-    return Dataset.from_list(rows)
+    ds = Dataset.from_dict({"text": texts})
+
+    def tok(batch):
+        return tokenizer(batch["text"], truncation=True, max_length=max_len)
+
+    return ds.map(tok, batched=True, remove_columns=["text"])
 
 
 def build_quant_config():
     try:
         import torch
         from transformers import BitsAndBytesConfig
+        import bitsandbytes  # noqa: F401
     except ImportError as exc:
         raise RuntimeError(
             "4-bit needs bitsandbytes (pip install bitsandbytes). "
             "Native Windows is unsupported — use WSL2, or --quant none."
-        ) from exc
-    try:
-        import bitsandbytes  # noqa: F401
-    except ImportError as exc:
-        raise RuntimeError(
-            "bitsandbytes not importable on this platform. "
-            "Use WSL2 for 4-bit, or --quant none for ≤1B proof models."
         ) from exc
     return BitsAndBytesConfig(
         load_in_4bit=True,
@@ -64,30 +69,43 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-steps", type=int, default=50)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--quant", choices=["4bit", "none"], default="none")
-    ap.add_argument("--assistant-only", dest="assistant_only", action="store_true", default=True)
-    ap.add_argument("--no-assistant-only", dest="assistant_only", action="store_false",
-                    help="if the model's chat template lacks generation markers")
     args = ap.parse_args(argv)
 
     import torch
-    from peft import LoraConfig, TaskType
-    from trl import SFTConfig, SFTTrainer
+    from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+    from transformers import (AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling,
+                              Trainer, TrainingArguments)
 
     cfg = LoRAConfig.from_yaml(args.config)
-    ds = load_chat_dataset(args.train)
-    print(f"records={len(ds)} model={args.model} quant={args.quant}")
+    print(f"records=? model={args.model} quant={args.quant}")
 
-    model_kwargs = {"dtype": torch.float16}
-    bnb = None
+    tok = AutoTokenizer.from_pretrained(args.model)
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+
+    load_kwargs: dict = {"dtype": torch.float16}
     if args.quant == "4bit":
-        bnb = build_quant_config()
-        model_kwargs["device_map"] = "auto"
+        load_kwargs["quantization_config"] = build_quant_config()
+        load_kwargs["device_map"] = "auto"
+    model = AutoModelForCausalLM.from_pretrained(args.model, **load_kwargs)
+    if args.quant == "4bit":
+        model = prepare_model_for_kbit_training(model)
+    if cfg.grad_checkpointing:
+        model.gradient_checkpointing_enable()
+        model.config.use_cache = False
 
-    sft = SFTConfig(
+    lora = LoraConfig(task_type=TaskType.CAUSAL_LM, r=cfg.r, lora_alpha=cfg.lora_alpha,
+                      lora_dropout=cfg.lora_dropout, target_modules=list(cfg.target_modules),
+                      bias="none")
+    model = get_peft_model(model, lora)
+    model.print_trainable_parameters()
+
+    ds = load_text_dataset(args.train, tok, cfg.max_seq_len)
+    print(f"records={len(ds)}")
+    targs = TrainingArguments(
         output_dir=args.output,
         per_device_train_batch_size=cfg.per_device_batch,
         gradient_accumulation_steps=cfg.grad_accum,
-        gradient_checkpointing=cfg.grad_checkpointing,
         max_steps=args.max_steps,
         learning_rate=args.lr,
         lr_scheduler_type="cosine",
@@ -98,22 +116,12 @@ def main(argv: list[str] | None = None) -> int:
         fp16=True,
         report_to="none",
         seed=7,
-        max_length=cfg.max_seq_len,
-        assistant_only_loss=args.assistant_only,
-        model_init_kwargs=model_kwargs,
     )
-    lora = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        r=cfg.r,
-        lora_alpha=cfg.lora_alpha,
-        lora_dropout=cfg.lora_dropout,
-        target_modules=list(cfg.target_modules),
-        bias="none",
-    )
-    trainer = SFTTrainer(model=args.model, args=sft, train_dataset=ds,
-                         peft_config=lora, quantization_config=bnb)
+    trainer = Trainer(model=model, args=targs, train_dataset=ds,
+                      data_collator=DataCollatorForLanguageModeling(tok, mlm=False))
     out = trainer.train()
-    trainer.save_model(args.output)
+    model.save_pretrained(args.output)
+    tok.save_pretrained(args.output)
     losses = [e["loss"] for e in trainer.state.log_history if "loss" in e]
     print(json.dumps({"global_steps": out.global_step,
                       "train_loss": round(out.training_loss, 4),

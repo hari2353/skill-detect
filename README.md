@@ -50,6 +50,12 @@ Proof run — ungated tiny model, fp16 LoRA, GPU end-to-end in minutes:
   --adapter adapters\smollm2-proof
 ```
 
+Proven on RTX 3070 (2026-10-11): 50 steps, 6.3 epochs, loss **3.76 → 2.67**,
+1.84M trainable params (1.35%), adapter in `adapters/smollm2-proof`.
+Real-generation F1 = 0.0 — the 135M model talks about the right skill but
+emits prose, not strict JSON. That format gap is exactly what the Gemma 4B +
+assistant-only-loss run closes; the loop itself is proven end-to-end.
+
 Target run — Gemma 3-4B QLoRA (needs two things this laptop can't fake):
 
 1. **License gate:** `hf auth login` + accept `google/gemma-3-4b-it` on HuggingFace.

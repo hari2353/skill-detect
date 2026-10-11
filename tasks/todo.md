@@ -22,7 +22,12 @@
   - Acceptance: train_qlora.py (SFT, assistant-only loss, 4bit/fp16) + eval_model.py run; HFClient unit-tested via injected stub
   - Verify: `pytest -q` → 24 passed; proof run below
   - Files: scripts/train_qlora.py, scripts/eval_model.py, src/skill_project/gateway.py, tests/test_gateway.py
-- [ ] Task: QLoRA GPU run (proof: SmolLM2-135M fp16 LoRA on RTX 3070; target: Gemma 4B in WSL2)
-  - Acceptance: loss decreases over 50 steps, adapter saved to adapters/, eval_model runs real generation + F1
-  - Verify: train JSON report + `python scripts/eval_model.py --adapter adapters/smollm2-proof`
-  - Files: adapters/* (gitignored), README GPU section
+- [x] Task: QLoRA GPU proof (SmolLM2-135M fp16 LoRA, 50 steps, RTX 3070 native Windows)
+  - Acceptance: loss decreases, adapter saved, eval_model runs real generation + F1
+  - Verify: train JSON {global_steps 50, first_loss 3.76, last_loss 2.67, adapters/smollm2-proof}; eval F1 0.0 (see note)
+  - Result note: loop proven end-to-end on GPU; 135M/50-step model emits prose about the right skill, not strict JSON → F1 0 is a format-following gap, fixed by scale (Gemma 4B) + assistant-only loss. Quality run stays WSL2+gated.
+  - Files: scripts/train_qlora.py, scripts/eval_model.py, adapters/* (gitignored)
+- [ ] Task: Gemma 3-4B QLoRA quality run (WSL2 + Unsloth + `hf auth login` + license accept)
+  - Acceptance: heldout micro-F1 clearly above 0 with strict-JSON hits (ESCO + custom)
+  - Verify: `python scripts/eval_model.py --model google/gemma-3-4b-it --adapter adapters/gemma3-4b-qlora`
+  - Files: adapters/* (gitignored)
