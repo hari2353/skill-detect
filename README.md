@@ -19,8 +19,14 @@ D:; cd D:\skill-project
 python -m venv .venv --system-site-packages; .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"          # light: tests only
 pip install transformers peft trl datasets accelerate safetensors huggingface_hub  # train/infer
-python -m pytest -q              # 33 passed, 1 skipped (regression needs train deps); no network/GPU
+python -m pytest -q              # 33 passed, 3 skipped; no network/GPU
 ```
+
+The skip count depends on your environment. 3 tests use `pytest.importorskip`
+for optional extras: fastapi (serving), litellm (gateway),
+transformers+torch (training). Install `.[dev]` plus the extras you use, and
+the matching tests run instead of skipping. This README count is measured in
+the light environment: dev tools only, no optional extras installed.
 
 Full pipeline (all offline, ~1 min):
 
