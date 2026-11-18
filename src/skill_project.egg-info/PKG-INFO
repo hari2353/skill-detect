@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: skill-project
+Version: 0.1.0
+Summary: LiteLLM gateway + QLoRA skill detection (ESCO base, custom skills as LoRA)
+Requires-Python: >=3.11
+License-File: LICENSE
+Requires-Dist: pyyaml>=6
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Provides-Extra: gateway
+Requires-Dist: litellm>=1.50; extra == "gateway"
+Provides-Extra: train
+Requires-Dist: torch>=2.7; extra == "train"
+Requires-Dist: transformers>=5.19; extra == "train"
+Requires-Dist: peft>=0.21; extra == "train"
+Requires-Dist: datasets>=2.19; extra == "train"
+Requires-Dist: accelerate>=1.15; extra == "train"
+Requires-Dist: safetensors>=0.8; extra == "train"
+Requires-Dist: huggingface_hub>=2.2; extra == "train"
+Provides-Extra: serve
+Requires-Dist: fastapi>=0.115; extra == "serve"
+Requires-Dist: uvicorn>=0.32; extra == "serve"
+Requires-Dist: prometheus_client>=0.26; extra == "serve"
+Dynamic: license-file

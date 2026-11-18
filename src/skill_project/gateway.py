@@ -64,6 +64,62 @@ EXTRACTION_PROMPT = (
 )
 
 
+def parse_json_array(raw: str) -> list[dict]:
+    """Tolerant array parser: plain JSON, markdown-fenced, prose-wrapped, or
+    a single object. Returns [] only when nothing parseable is present."""
+    return _try_parse(raw)[1]
+
+
+def _try_parse(raw: str) -> tuple[bool, list[dict]]:
+    """(found_json, items) — `found_json` distinguishes a legitimate empty
+    array from unparseable output."""
+    for i, ch in enumerate(raw):
+        if ch not in "[{":
+            continue
+        candidate = _balanced_slice(raw, i)
+        if candidate is None:
+            continue
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, list):
+            if payload and not any(isinstance(it, dict) for it in payload):
+                continue  # e.g. a stray "[1]" in prose; keep scanning
+            return True, [it for it in payload if isinstance(it, dict)]
+        if isinstance(payload, dict):
+            return True, [payload]
+        return True, []
+    return False, []
+
+
+def _balanced_slice(text: str, start: int) -> str | None:
+    """Balanced JSON slice from `start`, ignoring brackets inside strings."""
+    opener = text[start]
+    closer = "}" if opener == "{" else "]"
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 class SkillExtractor:
     """Single-model extractor: prompt -> JSON -> validated SkillHits."""
 
@@ -75,6 +131,7 @@ class SkillExtractor:
         self._model = model
         self._taxonomy = taxonomy
         self.truncated_inputs: list[str] = []
+        self.parse_failures = 0
 
     def extract(self, text: str) -> list[SkillHit]:
         known = [s.id for s in list(self._taxonomy.all_skills())[:self.known_id_limit]]
@@ -85,9 +142,9 @@ class SkillExtractor:
                 "chunk it upstream — truncation would silently lose skills")
         prompt = EXTRACTION_PROMPT.format(known_ids=", ".join(known), text=text)
         raw = self._client.complete(self._model, prompt)
-        try:
-            items = json.loads(raw)
-        except json.JSONDecodeError:
+        found, items = _try_parse(raw)
+        if not found:
+            self.parse_failures += 1
             return []
         hits: list[SkillHit] = []
         for it in items:

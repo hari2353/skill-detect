@@ -24,6 +24,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 
+from .spans import span_grounded
+
 PRICE_PER_MTOK = {  # USD per 1M tokens in/out; local models cost 0
     "skill-detect-qlora": (0.0, 0.0),
     "skill-detect-fallback": (0.15, 0.60),
@@ -88,7 +90,7 @@ def validate_hits(hits: list, text: str, known_ids: set[str], max_hits: int = 20
         if not allowed:
             violations.append(f"unknown id dropped: {sid}")
             continue
-        if span and span not in text:
+        if span and not span_grounded(span, text):
             violations.append(f"ungrounded span dropped: {span!r}")
             continue
         kept.append(h)
@@ -116,6 +118,7 @@ class ServeSettings:
     max_inflight: int = 4
     max_hits: int = 20
     max_input_chars: int = 4000  # hard cap on request text; longer is refused, not truncated
+    batch_max: int = 20  # hard cap on /extract/batch; larger batches are refused
     webhook: str = ""
     audit_file: str = "logs/audit.jsonl"  # "off" disables; SKILL_AUDIT_TEXT=1 logs raw text
     include_text: bool = False
@@ -260,6 +263,27 @@ def build_app(make_extractor=None, known_ids: set[str] | None = None,
                 400, f"input too long ({len(raw)} > {settings.max_input_chars} chars); "
                      "chunk it upstream — truncation would silently lose skills")
         return JSONResponse(await run_pipeline(raw, cid))
+
+    @app.post("/extract/batch")
+    async def extract_batch(body: dict, request: Request):
+        """Bulk ingest with per-item error isolation: one failing text never
+        fails the batch; caps are hard refusals, never silent truncation."""
+        cid = getattr(request.state, "correlation_id", "-")
+        texts = body.get("texts")
+        if not isinstance(texts, list) or not texts:
+            raise HTTPException(400, "texts must be a non-empty list")
+        if len(texts) > settings.batch_max:
+            raise HTTPException(
+                400, f"batch too large ({len(texts)} > {settings.batch_max}); split the batch")
+        results = []
+        for text in texts:
+            try:
+                results.append({"status": 200, **(await run_pipeline(str(text), cid))})
+            except HTTPException as exc:
+                results.append({"status": exc.status_code, "error": str(exc.detail)})
+        n_ok = sum(1 for r in results if r["status"] == 200)
+        return {"correlation_id": cid, "n_ok": n_ok,
+                "n_failed": len(results) - n_ok, "results": results}
 
     # ---- OpenAI-compatible surface (clients probe /v1/*; see configs/litellm.yaml) ----
 

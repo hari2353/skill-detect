@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .spans import span_grounded
 from .taxonomy import CompositeTaxonomy
 
 SYSTEM = ("You are a skill extractor. Reply ONLY with a JSON array of "
@@ -36,7 +37,7 @@ def validate_record(rec: TrainRecord, taxonomy: CompositeTaxonomy) -> list[str]:
     for sid, span in rec.skills:
         if taxonomy.lookup(sid) is None:
             errors.append(f"unknown skill id: {sid}")
-        if span and span not in rec.text:
+        if span and not span_grounded(span, rec.text):
             errors.append(f"span not in text: {span!r}")
     return errors
 

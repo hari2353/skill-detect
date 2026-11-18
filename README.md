@@ -19,7 +19,7 @@ D:; cd D:\skill-project
 python -m venv .venv --system-site-packages; .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"          # light: tests only
 pip install transformers peft trl datasets accelerate safetensors huggingface_hub  # train/infer
-python -m pytest -q              # 33 passed, 3 skipped; no network/GPU
+python -m pytest -q              # 33 passed, 4 skipped; no network/GPU
 ```
 
 The skip count depends on your environment. 3 tests use `pytest.importorskip`
@@ -101,6 +101,19 @@ $env:SKILL_MODEL="HuggingFaceTB/SmolLM2-135M-Instruct"; $env:SKILL_ADAPTER="adap
 
 Proven live: 200 with real GPU weights, correlation echo, audit row, judge
 alert counter, cost $0.00 local. Breaker/guardrails/judge/audit covered by tests.
+
+### Extraction + ingestion hygiene (market-steal, 2026-11-18)
+
+- **Normalized span grounding** (`skill_project/spans.py`) — case, collapsed
+  whitespace and trailing sentence punctuation are tolerated before a span is
+  dropped; operator punctuation keeps meaning (`C++` never grounds as `C`).
+  Shared by serving guardrails and dataset validation.
+- **Tolerant JSON parsing** (gateway) — markdown fences, prose-wrapped output
+  and single-object replies are repaired before giving up; unparseable output
+  is counted in `parse_failures` instead of vanishing as an empty list.
+- **Batch ingestion** — `POST /extract/batch {"texts": [...]}` runs each text
+  through the same pipeline (guardrails/judge/metrics/audit) with per-item
+  error isolation, `n_ok`/`n_failed` and a hard `batch_max` cap (default 20).
 
 ## VRAM reality (RTX 3070 8GB)
 
