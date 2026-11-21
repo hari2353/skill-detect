@@ -133,6 +133,16 @@ alert counter, cost $0.00 local. Breaker/guardrails/judge/audit covered by tests
   `HFClient` (local base+adapter — same pipeline, one-constructor swap).
 - `SkillRouter`: custom-adapter → base → fallback. Order is config, not code.
 
+## Training footprint (Harvard Edge TinyML-Footprint cross-pollination)
+
+`skill_project.footprint` reports operational energy/carbon for a QLoRA run
+and LoRA trainable-parameter accounting:
+
+```python
+training_carbon(gpu_hours=2.0, gpu_power_w=400, pue=1.15, carbon_intensity_g_per_kwh=400)
+qlora_trainable_params(rank=16, hidden=896, targets=["q","k","v","o"], layers=24)
+```
+
 ## Repo layout
 
 ```
