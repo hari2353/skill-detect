@@ -124,7 +124,6 @@ def test_empty_text_rejected():
 
 
 def test_correlation_id_echoed_or_generated():
-    import json as _json
 
     client = TestClient(_stub_app([_hit("esco:1", "Python")]))
     r = client.post(

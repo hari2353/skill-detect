@@ -9,7 +9,6 @@ ingestion with per-item error isolation.
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
