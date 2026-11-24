@@ -3,6 +3,7 @@
 `--smoke` runs on CPU with zero downloads (validates config + prompt wiring).
 Real training lazily imports torch/transformers/peft so `[dev]` stays light.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -83,7 +84,9 @@ def train(cfg: LoRAConfig) -> None:
         raise RuntimeError(
             "train deps missing. Run: pip install -e '.[train]' (WSL2 recommended on Windows)."
         ) from exc
-    print(f"launching QLoRA on {cfg.base_model} (r={cfg.r}, 4bit={cfg.load_in_4bit}) ...")
+    print(
+        f"launching QLoRA on {cfg.base_model} (r={cfg.r}, 4bit={cfg.load_in_4bit}) ..."
+    )
     # Full SFT loop (trl.SFTTrainer) is Slice 4; smoke validates everything before it.
 
 

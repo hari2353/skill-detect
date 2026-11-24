@@ -3,6 +3,7 @@
 Cross-pollinated from harvard-edge/TinyML-Footprint, mirroring the same
 module in lora-finetune-lab so both training repos report energy and carbon
 on the same boundary."""
+
 from __future__ import annotations
 
 JOULES_PER_KWH = 3_600_000.0
@@ -19,12 +20,18 @@ def training_energy(gpu_hours, gpu_power_w, *, gpus=1, pue=1.15):
     return {"gpu_hours": round(gpu_hours, 4), "gpus": gpus, "kwh": round(kwh, 4)}
 
 
-def training_carbon(gpu_hours, gpu_power_w, *, carbon_intensity_g_per_kwh=400.0, gpus=1, pue=1.15):
+def training_carbon(
+    gpu_hours, gpu_power_w, *, carbon_intensity_g_per_kwh=400.0, gpus=1, pue=1.15
+):
     if carbon_intensity_g_per_kwh < 0:
         raise ValueError("carbon intensity must be >= 0")
     energy = training_energy(gpu_hours, gpu_power_w, gpus=gpus, pue=pue)
     kg = energy["kwh"] * carbon_intensity_g_per_kwh / 1000
-    return {**energy, "carbon_intensity_g_per_kwh": carbon_intensity_g_per_kwh, "kgco2e": round(kg, 4)}
+    return {
+        **energy,
+        "carbon_intensity_g_per_kwh": carbon_intensity_g_per_kwh,
+        "kgco2e": round(kg, 4),
+    }
 
 
 def qlora_trainable_params(rank, hidden, targets, layers):
@@ -34,7 +41,12 @@ def qlora_trainable_params(rank, hidden, targets, layers):
     if not targets:
         raise ValueError("targets must be non-empty")
     per_layer = rank * sum(2 * hidden for _ in targets)
-    return {"rank": rank, "layers": layers, "targets": len(targets), "trainable_params": per_layer * layers}
+    return {
+        "rank": rank,
+        "layers": layers,
+        "targets": len(targets),
+        "trainable_params": per_layer * layers,
+    }
 
 
 def qlora_share(trainable_params, base_params):

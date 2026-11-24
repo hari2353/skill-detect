@@ -1,12 +1,26 @@
 from skill_project.dataset import TrainRecord, validate_record, write_jsonl
-from skill_project.taxonomy import CompositeTaxonomy, CustomSkillRegistry, InMemoryTaxonomy, Skill
+from skill_project.taxonomy import (
+    CompositeTaxonomy,
+    CustomSkillRegistry,
+    InMemoryTaxonomy,
+    Skill,
+)
 
 
 def _tax() -> CompositeTaxonomy:
-    base = InMemoryTaxonomy([Skill(id="esco:1", label="Python programming", namespace="esco")])
+    base = InMemoryTaxonomy(
+        [Skill(id="esco:1", label="Python programming", namespace="esco")]
+    )
     base.namespace = "esco"
-    custom = CustomSkillRegistry([Skill(id="custom:prompt-engineering", label="prompt engineering",
-                                        namespace="custom")])
+    custom = CustomSkillRegistry(
+        [
+            Skill(
+                id="custom:prompt-engineering",
+                label="prompt engineering",
+                namespace="custom",
+            )
+        ]
+    )
     return CompositeTaxonomy([base, custom])
 
 
@@ -29,7 +43,10 @@ def test_validate_rejects_empty():
 
 
 def test_chat_format_has_three_roles(tmp_path):
-    rec = TrainRecord(text="prompt engineering expert", skills=(("custom:prompt-engineering", "prompt engineering"),))
+    rec = TrainRecord(
+        text="prompt engineering expert",
+        skills=(("custom:prompt-engineering", "prompt engineering"),),
+    )
     chat = rec.to_chat()
     assert [m["role"] for m in chat["messages"]] == ["system", "user", "assistant"]
     n = write_jsonl([rec], tmp_path / "t.jsonl")

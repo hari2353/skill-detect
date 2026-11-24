@@ -15,7 +15,11 @@ import pytest
 
 from skill_project.dataset import TrainRecord, validate_record
 from skill_project.gateway import FakeClient, SkillExtractor, parse_json_array
-from skill_project.taxonomy import CompositeTaxonomy, CustomSkillRegistry, InMemoryTaxonomy
+from skill_project.taxonomy import (
+    CompositeTaxonomy,
+    CustomSkillRegistry,
+    InMemoryTaxonomy,
+)
 from skill_project.taxonomy import Skill
 
 fastapi = pytest.importorskip("fastapi")
@@ -52,7 +56,9 @@ def _stub_app(hits=None, fail=False, **kw):
 
     kw.setdefault("audit_file", "off")
     settings = ServeSettings(sample_rate=1.0, judge_threshold=0.6, **kw)
-    return build_app(lambda: Stub(), {"esco:1"}, settings, CircuitBreaker(failure_threshold=2))
+    return build_app(
+        lambda: Stub(), {"esco:1"}, settings, CircuitBreaker(failure_threshold=2)
+    )
 
 
 # ── grounded-span normalization ─────────────────────────────────────────────
@@ -91,7 +97,9 @@ class TestSpanGrounding:
         assert any("ungrounded" in v for v in violations)
 
     def test_dataset_validation_accepts_normalized_variants(self) -> None:
-        rec = TrainRecord(text="I know Python. Also some SQL.", skills=(("esco:1", "python"),))
+        rec = TrainRecord(
+            text="I know Python. Also some SQL.", skills=(("esco:1", "python"),)
+        )
         assert validate_record(rec, _taxonomy()) == []
 
 
@@ -124,14 +132,18 @@ class TestTolerantParsing:
         assert parse_json_array(raw) == [{"skill_id": "a"}]
 
     def test_extractor_uses_tolerant_parser(self) -> None:
-        client = FakeClient(response='```json\n[{"skill_id": "esco:1", "span": "Python"}]\n```')
+        client = FakeClient(
+            response='```json\n[{"skill_id": "esco:1", "span": "Python"}]\n```'
+        )
         extractor = SkillExtractor(client, "m", _taxonomy())
         hits = extractor.extract("I know Python well enough.")
         assert [h.skill_id for h in hits] == ["esco:1"]
         assert extractor.parse_failures == 0
 
     def test_extractor_counts_parse_failures(self) -> None:
-        extractor = SkillExtractor(FakeClient(response="oops not json"), "m", _taxonomy())
+        extractor = SkillExtractor(
+            FakeClient(response="oops not json"), "m", _taxonomy()
+        )
         assert extractor.extract("I know Python well enough.") == []
         assert extractor.parse_failures == 1
 
@@ -141,22 +153,32 @@ class TestBatchEndpoint:
     def test_batch_isolates_failures(self) -> None:
         hits = [_hit("esco:1", "Python")]
         client = TestClient(_stub_app(hits))
-        r = client.post("/extract/batch", json={"texts": [
-            "I know Python well and use it daily for ETL.",
-            "   ",
-            "More Python work across teams and pipelines.",
-        ]})
+        r = client.post(
+            "/extract/batch",
+            json={
+                "texts": [
+                    "I know Python well and use it daily for ETL.",
+                    "   ",
+                    "More Python work across teams and pipelines.",
+                ]
+            },
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["n_ok"] == 2 and body["n_failed"] == 1
         statuses = [item["status"] for item in body["results"]]
         assert statuses == [200, 400, 200]
-        assert all("cid" not in item for item in body["results"])  # correlation is batch-level
+        assert all(
+            "cid" not in item for item in body["results"]
+        )  # correlation is batch-level
         assert body["correlation_id"]
 
     def test_batch_item_502_does_not_fail_batch(self) -> None:
         client = TestClient(_stub_app(fail=True))
-        body = client.post("/extract/batch", json={"texts": ["one long enough text here", "another long enough text"]}).json()
+        body = client.post(
+            "/extract/batch",
+            json={"texts": ["one long enough text here", "another long enough text"]},
+        ).json()
         assert body["n_ok"] == 0 and body["n_failed"] == 2
         # threshold=2: both calls 502; the circuit opens for the next request
         assert [item["status"] for item in body["results"]] == [502, 502]

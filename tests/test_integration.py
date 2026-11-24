@@ -4,6 +4,7 @@ Scenarios mirror production use: resume intake, custom-skill onboarding,
 adapter outage fallback, dataset build, scoring, config validity, demo.
 No network, no GPU.
 """
+
 import json
 import sys
 from pathlib import Path
@@ -22,10 +23,16 @@ import eval_f1
 import fetch_esco
 from skill_project.dataset import TrainRecord, validate_record, write_jsonl
 from skill_project.gateway import FakeClient, SkillExtractor, SkillRouter
-from skill_project.taxonomy import CompositeTaxonomy, CustomSkillRegistry, load_esco_snapshot
+from skill_project.taxonomy import (
+    CompositeTaxonomy,
+    CustomSkillRegistry,
+    load_esco_snapshot,
+)
 
-RESUME = ("Hired ML engineer: Python programming for ETL pipelines, "
-          "Docker deploys, and prompt engineering for support bots.")
+RESUME = (
+    "Hired ML engineer: Python programming for ETL pipelines, "
+    "Docker deploys, and prompt engineering for support bots."
+)
 
 
 def _snapshot(tmp_path: Path) -> Path:
@@ -45,12 +52,16 @@ def _taxonomy(p: Path) -> CompositeTaxonomy:
 
 def test_resume_to_skills_end_to_end(tmp_path):
     taxonomy = _taxonomy(_snapshot(tmp_path))
-    canned = json.dumps([
-        {"skill_id": "esco:seed-python", "span": "Python programming"},
-        {"skill_id": "esco:seed-etl", "span": "ETL pipelines"},
-        {"skill_id": "custom:prompt-engineering", "span": "prompt engineering"},
-    ])
-    hits = SkillExtractor(FakeClient(canned), "skill-detect-qlora", taxonomy).extract(RESUME)
+    canned = json.dumps(
+        [
+            {"skill_id": "esco:seed-python", "span": "Python programming"},
+            {"skill_id": "esco:seed-etl", "span": "ETL pipelines"},
+            {"skill_id": "custom:prompt-engineering", "span": "prompt engineering"},
+        ]
+    )
+    hits = SkillExtractor(FakeClient(canned), "skill-detect-qlora", taxonomy).extract(
+        RESUME
+    )
     by_id = {h.skill_id: h for h in hits}
     assert by_id["esco:seed-python"].namespace == "esco"
     assert by_id["custom:prompt-engineering"].namespace == "custom"
@@ -82,7 +93,9 @@ def test_adapter_outage_falls_back_and_still_extracts(tmp_path):
                 raise ConnectionError("qlora endpoint down")
             return json.dumps([{"skill_id": "esco:seed-sql", "span": "SQL"}])
 
-    router = SkillRouter(Flaky(), taxonomy, ["skill-detect-qlora", "skill-detect-fallback"])
+    router = SkillRouter(
+        Flaky(), taxonomy, ["skill-detect-qlora", "skill-detect-fallback"]
+    )
     hits = router.extract("SQL databases expert")
     assert router.used_model == "skill-detect-fallback"
     assert hits[0].skill_id == "esco:seed-sql"
@@ -90,8 +103,15 @@ def test_adapter_outage_falls_back_and_still_extracts(tmp_path):
 
 def test_dataset_pipeline_writes_valid_splits(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    assert fetch_esco.main(["--out", "data/esco_skills.jsonl", "--limit", "30", "--offline"]) == 0
-    assert build_custom_skills.main(["--out", "data/custom_train.jsonl", "--n", "30"]) == 0
+    assert (
+        fetch_esco.main(
+            ["--out", "data/esco_skills.jsonl", "--limit", "30", "--offline"]
+        )
+        == 0
+    )
+    assert (
+        build_custom_skills.main(["--out", "data/custom_train.jsonl", "--n", "30"]) == 0
+    )
     assert build_dataset.main(["--esco-n", "30", "--seed", "7"]) == 0
     taxonomy = CompositeTaxonomy([load_esco_snapshot(Path("data/esco_skills.jsonl"))])
     for f in ("data/train.jsonl", "data/heldout.jsonl"):
@@ -99,15 +119,26 @@ def test_dataset_pipeline_writes_valid_splits(tmp_path, monkeypatch):
         assert len(lines) >= 1
         for line in lines:  # every line is a valid 3-role chat with parseable gold JSON
             row = json.loads(line)
-            assert [m["role"] for m in row["messages"]] == ["system", "user", "assistant"]
-            gold = json.loads(next(m["content"] for m in row["messages"] if m["role"] == "assistant"))
+            assert [m["role"] for m in row["messages"]] == [
+                "system",
+                "user",
+                "assistant",
+            ]
+            gold = json.loads(
+                next(m["content"] for m in row["messages"] if m["role"] == "assistant")
+            )
             assert gold and all("skill_id" in g for g in gold)
 
 
 def test_eval_f1_oracle_perfect_empty_zero(tmp_path):
     recs = [
-        TrainRecord(text="Python programming guru", skills=(("esco:seed-python", "Python programming"),)),
-        TrainRecord(text="SQL databases admin", skills=(("esco:seed-sql", "SQL databases"),)),
+        TrainRecord(
+            text="Python programming guru",
+            skills=(("esco:seed-python", "Python programming"),),
+        ),
+        TrainRecord(
+            text="SQL databases admin", skills=(("esco:seed-sql", "SQL databases"),)
+        ),
     ]
     held = tmp_path / "held.jsonl"
     write_jsonl(recs, held)
@@ -116,7 +147,10 @@ def test_eval_f1_oracle_perfect_empty_zero(tmp_path):
     class Oracle:
         def extract(self, text):
             from types import SimpleNamespace
-            return [SimpleNamespace(skill_id=s) for _t, g in pairs if _t == text for s in g]
+
+            return [
+                SimpleNamespace(skill_id=s) for _t, g in pairs if _t == text for s in g
+            ]
 
     class Empty:
         def extract(self, text):
@@ -129,10 +163,14 @@ def test_eval_f1_oracle_perfect_empty_zero(tmp_path):
 
 
 def test_litellm_config_chain_valid():
-    cfg = yaml.safe_load((ROOT / "configs" / "litellm.yaml").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(
+        (ROOT / "configs" / "litellm.yaml").read_text(encoding="utf-8")
+    )
     names = [m["model_name"] for m in cfg["model_list"]]
     assert names[0] == "skill-detect-qlora" and names[-1] == "skill-detect-fallback"
-    fallbacks = cfg["router_settings"]["fallbacks"]  # LiteLLM form: [{model: [fallbacks]}]
+    fallbacks = cfg["router_settings"][
+        "fallbacks"
+    ]  # LiteLLM form: [{model: [fallbacks]}]
     flat = {}
     for entry in fallbacks:
         flat.update(entry)
@@ -144,18 +182,26 @@ def test_litellm_config_chain_valid():
 
 def test_litellm_router_constructs_from_config():
     litellm = pytest.importorskip("litellm")
-    cfg = yaml.safe_load((ROOT / "configs" / "litellm.yaml").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(
+        (ROOT / "configs" / "litellm.yaml").read_text(encoding="utf-8")
+    )
     rs = cfg["router_settings"]
-    r = litellm.Router(model_list=cfg["model_list"], fallbacks=rs["fallbacks"],
-                       routing_strategy=rs["routing_strategy"],
-                       num_retries=rs["num_retries"])
+    r = litellm.Router(
+        model_list=cfg["model_list"],
+        fallbacks=rs["fallbacks"],
+        routing_strategy=rs["routing_strategy"],
+        num_retries=rs["num_retries"],
+    )
     assert [m["model_name"] for m in r.get_model_list()] == [
-        "skill-detect-qlora", "skill-detect-fallback"]
+        "skill-detect-qlora",
+        "skill-detect-fallback",
+    ]
     assert r.fallbacks == [{"skill-detect-qlora": ["skill-detect-fallback"]}]
 
 
 def test_train_script_cli_parses():
     import train_qlora
+
     with pytest.raises(SystemExit) as exc:
         train_qlora.main(["--help"])
     assert exc.value.code == 0

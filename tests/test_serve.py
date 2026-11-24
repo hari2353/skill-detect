@@ -1,4 +1,5 @@
 """Serving tests: breaker, guardrails, judge, routes. All offline with stubs."""
+
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,8 +13,13 @@ fastapi = pytest.importorskip("fastapi")
 pytest.importorskip("prometheus_client")
 from fastapi.testclient import TestClient
 
-from skill_project.serve import (CircuitBreaker, ServeSettings, build_app, judge_score,
-                                 validate_hits)
+from skill_project.serve import (
+    CircuitBreaker,
+    ServeSettings,
+    build_app,
+    judge_score,
+    validate_hits,
+)
 
 
 def _hit(sid, span="Python"):
@@ -38,9 +44,15 @@ def test_breaker_opens_and_half_opens():
 
 
 def test_guardrails_drop_and_cap():
-    hits = [_hit("esco:1", "Python"), _hit("bogus:x", "Python"),
-            _hit("esco:2", "Rust"), _hit("custom:mine", "")]
-    kept, violations = validate_hits(hits, "I know Python", {"esco:1", "esco:2"}, max_hits=3)
+    hits = [
+        _hit("esco:1", "Python"),
+        _hit("bogus:x", "Python"),
+        _hit("esco:2", "Rust"),
+        _hit("custom:mine", ""),
+    ]
+    kept, violations = validate_hits(
+        hits, "I know Python", {"esco:1", "esco:2"}, max_hits=3
+    )
     # slice-then-validate: 4th hit never evaluated; unknown id + ungrounded span + cap note
     assert [h.skill_id for h in kept] == ["esco:1"]
     assert len(violations) == 3
@@ -64,13 +76,18 @@ def _stub_app(hits=None, fail=False, **kw):
 
     kw.setdefault("audit_file", "off")
     settings = ServeSettings(sample_rate=1.0, judge_threshold=0.6, **kw)
-    return build_app(lambda: Stub(), {"esco:1"}, settings, CircuitBreaker(failure_threshold=2))
+    return build_app(
+        lambda: Stub(), {"esco:1"}, settings, CircuitBreaker(failure_threshold=2)
+    )
 
 
 def test_extract_ok_and_metrics():
     hits = [_hit("esco:1", "Python")]
     client = TestClient(_stub_app(hits))
-    r = client.post("/extract", json={"text": "I know Python well and use it daily for ETL pipelines"})
+    r = client.post(
+        "/extract",
+        json={"text": "I know Python well and use it daily for ETL pipelines"},
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["hits"][0]["skill_id"] == "esco:1" and body["judge"] == 1.0
@@ -81,13 +98,21 @@ def test_extract_ok_and_metrics():
 
 def test_extract_alerts_on_empty_and_breaker_opens():
     client = TestClient(_stub_app([], fail=False))
-    body = client.post("/extract", json={"text": "a long enough text with no skills at all here"}).json()
+    body = client.post(
+        "/extract", json={"text": "a long enough text with no skills at all here"}
+    ).json()
     assert body["judge"] == 0.0
     assert "skill_judge_alerts_total" in client.get("/metrics").text
 
     bad = TestClient(_stub_app(fail=True))
-    assert bad.post("/extract", json={"text": "hello world hello world"}).status_code == 502
-    assert bad.post("/extract", json={"text": "hello world hello world"}).status_code == 502
+    assert (
+        bad.post("/extract", json={"text": "hello world hello world"}).status_code
+        == 502
+    )
+    assert (
+        bad.post("/extract", json={"text": "hello world hello world"}).status_code
+        == 502
+    )
     r = bad.post("/extract", json={"text": "hello world hello world"})
     assert r.status_code == 503  # circuit open
     assert bad.get("/health").json()["circuit"] == "open"
@@ -100,24 +125,36 @@ def test_empty_text_rejected():
 
 def test_correlation_id_echoed_or_generated():
     import json as _json
+
     client = TestClient(_stub_app([_hit("esco:1", "Python")]))
-    r = client.post("/extract", json={"text": "Python engineer with ETL pipelines experience"},
-                    headers={"x-correlation-id": "req-123"})
+    r = client.post(
+        "/extract",
+        json={"text": "Python engineer with ETL pipelines experience"},
+        headers={"x-correlation-id": "req-123"},
+    )
     assert r.status_code == 200
     assert r.json()["correlation_id"] == "req-123" == r.headers["x-correlation-id"]
-    r2 = client.post("/extract", json={"text": "Python engineer with ETL pipelines experience"})
+    r2 = client.post(
+        "/extract", json={"text": "Python engineer with ETL pipelines experience"}
+    )
     assert len(r2.json()["correlation_id"]) == 12
 
 
 def test_audit_trail_written_with_hash_not_text(tmp_path):
     import json as _json
+
     audit = tmp_path / "audit.jsonl"
     client = TestClient(_stub_app([_hit("esco:1", "Python")], audit_file=str(audit)))
-    client.post("/extract", json={"text": "Python engineer with ETL pipelines experience"},
-                headers={"x-correlation-id": "audit-1"})
+    client.post(
+        "/extract",
+        json={"text": "Python engineer with ETL pipelines experience"},
+        headers={"x-correlation-id": "audit-1"},
+    )
     rows = [_json.loads(line) for line in audit.read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["cid"] == "audit-1" and rows[0]["status"] == 200
-    assert rows[0]["n_hits"] == 1 and "text" not in rows[0]  # hash only, privacy default
+    assert (
+        rows[0]["n_hits"] == 1 and "text" not in rows[0]
+    )  # hash only, privacy default
     assert len(rows[0]["text_sha256"]) == 16
 
 
@@ -128,18 +165,27 @@ def test_v1_models_lists_served_models():
     body = r.json()
     assert body["object"] == "list"
     ids = [m["id"] for m in body["data"]]
-    assert "skill-detect-qlora" in ids and all(m["object"] == "model" for m in body["data"])
+    assert "skill-detect-qlora" in ids and all(
+        m["object"] == "model" for m in body["data"]
+    )
 
 
 def test_v1_chat_completions_wraps_extraction():
     import json as _json
+
     hits = [_hit("esco:1", "Python")]
     client = TestClient(_stub_app(hits))
-    r = client.post("/v1/chat/completions",
-                    json={"model": "m", "messages": [
-                        {"role": "system", "content": "extract"},
-                        {"role": "user", "content": "Python engineer with ETL pipelines"}]},
-                    headers={"x-correlation-id": "oa-1"})
+    r = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "m",
+            "messages": [
+                {"role": "system", "content": "extract"},
+                {"role": "user", "content": "Python engineer with ETL pipelines"},
+            ],
+        },
+        headers={"x-correlation-id": "oa-1"},
+    )
     assert r.status_code == 200
     b = r.json()
     assert b["object"] == "chat.completion" and b["id"] == "chatcmpl-oa-1"
@@ -155,33 +201,51 @@ def test_v1_chat_completions_last_user_message_wins():
     client = TestClient(_stub_app(hits))
     # extractor sees the LAST user turn's text, not the system or earlier turns
     seen = {}
+
     class Spy:
         used_model = "m"
+
         def extract(self, text):
             seen["text"] = text
             return hits
-    app = build_app(lambda: Spy(), {"esco:1"}, ServeSettings(audit_file="off"), CircuitBreaker())
-    r = TestClient(app).post("/v1/chat/completions", json={"messages": [
-        {"role": "user", "content": "first turn"},
-        {"role": "assistant", "content": "ok"},
-        {"role": "user", "content": "Python engineer with ETL pipelines"}]})
+
+    app = build_app(
+        lambda: Spy(), {"esco:1"}, ServeSettings(audit_file="off"), CircuitBreaker()
+    )
+    r = TestClient(app).post(
+        "/v1/chat/completions",
+        json={
+            "messages": [
+                {"role": "user", "content": "first turn"},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": "Python engineer with ETL pipelines"},
+            ]
+        },
+    )
     assert r.status_code == 200 and seen["text"].startswith("Python engineer")
 
 
 def test_empty_allowlist_accepts_base_and_namespace_ids():
     # No known_ids loaded -> esco:* accepted, custom/third_party accepted, bogus dropped
     kept, violations = validate_hits(
-        [_hit("esco:1", "Python"), _hit("custom:x", ""),
-         _hit("third_party:acme:y", ""), _hit("bogus:z", "")],
-        "I know Python", set())
+        [
+            _hit("esco:1", "Python"),
+            _hit("custom:x", ""),
+            _hit("third_party:acme:y", ""),
+            _hit("bogus:z", ""),
+        ],
+        "I know Python",
+        set(),
+    )
     assert [h.skill_id for h in kept] == ["esco:1", "custom:x", "third_party:acme:y"]
     assert any("bogus:z" in v for v in violations)
 
 
 def test_loaded_allowlist_still_drops_unknown_esco():
     # With a real allowlist, an esco id not on it is a hallucination -> dropped
-    kept, violations = validate_hits([_hit("esco:ghost", "Python")],
-                                     "I know Python", {"esco:1"})
+    kept, violations = validate_hits(
+        [_hit("esco:ghost", "Python")], "I know Python", {"esco:1"}
+    )
     assert kept == [] and any("esco:ghost" in v for v in violations)
 
 
@@ -191,8 +255,10 @@ def test_overlong_input_refused_not_truncated():
     client = TestClient(_stub_app([_hit("esco:1", "Python")]))
     r = client.post("/extract", json={"text": "x" * 5000})
     assert r.status_code == 400 and "too long" in r.json()["detail"]
-    r2 = client.post("/v1/chat/completions",
-                     json={"messages": [{"role": "user", "content": "y" * 5000}]})
+    r2 = client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "y" * 5000}]},
+    )
     assert r2.status_code == 400 and "too long" in r2.json()["detail"]
 
 

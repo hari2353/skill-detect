@@ -1,4 +1,5 @@
 """Instruction-tuning dataset builder + validation (SRP: records only)."""
+
 from __future__ import annotations
 
 import json
@@ -9,8 +10,10 @@ from typing import Iterable
 from .spans import span_grounded
 from .taxonomy import CompositeTaxonomy
 
-SYSTEM = ("You are a skill extractor. Reply ONLY with a JSON array of "
-          '{"skill_id": ..., "span": ...}.')
+SYSTEM = (
+    "You are a skill extractor. Reply ONLY with a JSON array of "
+    '{"skill_id": ..., "span": ...}.'
+)
 
 
 @dataclass(frozen=True)
@@ -21,11 +24,13 @@ class TrainRecord:
     def to_chat(self) -> dict:
         user = f"Extract skills. Known IDs: {', '.join(s for s, _ in self.skills)}. Text: {self.text}"
         assistant = json.dumps([{"skill_id": s, "span": sp} for s, sp in self.skills])
-        return {"messages": [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": user},
-            {"role": "assistant", "content": assistant},
-        ]}
+        return {
+            "messages": [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": user},
+                {"role": "assistant", "content": assistant},
+            ]
+        }
 
 
 def validate_record(rec: TrainRecord, taxonomy: CompositeTaxonomy) -> list[str]:
